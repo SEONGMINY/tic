@@ -11,30 +11,32 @@ struct TimelineView: View {
     var onCompleteItem: (TicItem) -> Void
 
     let hourHeight: CGFloat = 60
-    private let timeColumnWidth: CGFloat = 52
+    private let timeColumnWidth: CGFloat = 44
 
     var body: some View {
-        GeometryReader { geometry in
-            let eventAreaWidth = geometry.size.width - timeColumnWidth
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                ZStack(alignment: .topLeading) {
+                    // 배경: 시간 라인
+                    timeLines
 
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    ZStack(alignment: .topLeading) {
-                        // 배경: 시간 라인
-                        timeLines
-
-                        // 전경: 이벤트 블록
+                    // 전경: 이벤트 블록
+                    GeometryReader { geometry in
+                        let eventAreaWidth = geometry.size.width - timeColumnWidth
                         ForEach(timedItems, id: \.id) { item in
                             eventBlock(for: item, containerWidth: eventAreaWidth)
                         }
+                    }
 
-                        // 현재 시간 표시 (오늘만)
-                        if selectedDate.isToday {
-                            currentTimeLine(containerWidth: geometry.size.width)
-                                .id("nowLine")
-                        }
+                    // 현재 시간 표시 (오늘만)
+                    if selectedDate.isToday {
+                        currentTimeLine
+                            .id("nowLine")
+                    }
 
-                        // 빈 시간대 꾹 누르기 (시간대별 타겟)
+                    // 빈 시간대 꾹 누르기
+                    GeometryReader { geometry in
+                        let eventAreaWidth = geometry.size.width - timeColumnWidth
                         ForEach(0..<24, id: \.self) { hour in
                             Color.clear
                                 .frame(width: eventAreaWidth, height: hourHeight)
@@ -48,15 +50,21 @@ struct TimelineView: View {
                                 .offset(x: timeColumnWidth, y: CGFloat(hour) * hourHeight)
                         }
                     }
-                    .frame(width: geometry.size.width, height: 24 * hourHeight)
                 }
-                .onAppear {
+                .frame(height: 24 * hourHeight + 20)
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     if selectedDate.isToday {
                         let hour = Calendar.current.component(.hour, from: Date())
                         let scrollHour = max(0, hour - 1)
-                        proxy.scrollTo("hour_\(scrollHour)", anchor: .top)
+                        withAnimation(.none) {
+                            proxy.scrollTo("hour_\(scrollHour)", anchor: .top)
+                        }
                     } else {
-                        proxy.scrollTo("hour_8", anchor: .top)
+                        withAnimation(.none) {
+                            proxy.scrollTo("hour_8", anchor: .top)
+                        }
                     }
                 }
             }
@@ -66,20 +74,22 @@ struct TimelineView: View {
     // MARK: - Time Lines
 
     private var timeLines: some View {
-        ForEach(0..<24, id: \.self) { hour in
-            HStack(spacing: 0) {
-                Text(String(format: "%02d:00", hour))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: timeColumnWidth, alignment: .trailing)
-                    .padding(.trailing, 8)
+        VStack(spacing: 0) {
+            ForEach(0..<24, id: \.self) { hour in
+                HStack(spacing: 0) {
+                    Text(String(format: "%02d:00", hour))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: timeColumnWidth, alignment: .trailing)
+                        .padding(.trailing, 6)
 
-                Rectangle()
-                    .fill(Color(.separator))
-                    .frame(height: 0.5)
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.5))
+                        .frame(height: 0.5)
+                }
+                .frame(height: hourHeight, alignment: .top)
+                .id("hour_\(hour)")
             }
-            .offset(y: CGFloat(hour) * hourHeight)
-            .id("hour_\(hour)")
         }
     }
 
@@ -105,8 +115,7 @@ struct TimelineView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
-                        .font(.caption)
-                        .fontWeight(.medium)
+                        .font(.system(size: 11, weight: .medium))
                         .lineLimit(height < 30 ? 1 : 2)
 
                     if height >= 40, let start = item.startDate {
@@ -116,7 +125,8 @@ struct TimelineView: View {
                             return f
                         }()
                         Text(formatter.string(from: start))
-                            .font(.caption2)
+                            .font(.system(size: 9))
+                            .opacity(0.8)
                     }
                 }
                 Spacer(minLength: 0)
@@ -124,7 +134,7 @@ struct TimelineView: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
             .frame(width: max(width - 2, 0), height: max(height - 1, 16), alignment: .topLeading)
-            .background(bgColor.opacity(0.8))
+            .background(bgColor.opacity(0.85))
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
@@ -141,25 +151,28 @@ struct TimelineView: View {
 
     // MARK: - Current Time Line
 
-    private func currentTimeLine(containerWidth: CGFloat) -> some View {
-        let now = Date()
-        let calendar = Calendar.current
-        let hour = calendar.component(.hour, from: now)
-        let minute = calendar.component(.minute, from: now)
-        let y = (CGFloat(hour) + CGFloat(minute) / 60.0) * hourHeight
+    private var currentTimeLine: some View {
+        GeometryReader { geometry in
+            let now = Date()
+            let calendar = Calendar.current
+            let hour = calendar.component(.hour, from: now)
+            let minute = calendar.component(.minute, from: now)
+            let y = (CGFloat(hour) + CGFloat(minute) / 60.0) * hourHeight
 
-        return ZStack(alignment: .leading) {
-            Circle()
-                .fill(.red)
-                .frame(width: 8, height: 8)
-                .offset(x: timeColumnWidth - 4)
+            ZStack(alignment: .leading) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 8, height: 8)
+                    .offset(x: timeColumnWidth - 4)
 
-            Rectangle()
-                .fill(.red)
-                .frame(width: containerWidth - timeColumnWidth, height: 1)
-                .offset(x: timeColumnWidth)
+                Rectangle()
+                    .fill(.red)
+                    .frame(width: geometry.size.width - timeColumnWidth, height: 1)
+                    .offset(x: timeColumnWidth)
+            }
+            .offset(y: y)
         }
-        .offset(y: y)
+        .frame(height: 24 * hourHeight)
     }
 
     // MARK: - Helpers

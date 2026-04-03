@@ -7,6 +7,7 @@ struct SmallTicWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TicWidgetProvider()) { entry in
             SmallWidgetView(entry: entry)
+                .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("tic")
         .description("다음 일정을 확인하세요")
@@ -83,7 +84,6 @@ struct SmallWidgetView: View {
                 }
             }
         }
-        .padding(12)
         .widgetURL(URL(string: "tic://day?date=\(dateString)")!)
     }
 }

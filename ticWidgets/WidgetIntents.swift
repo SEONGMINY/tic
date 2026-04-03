@@ -1,9 +1,10 @@
 import AppIntents
+import ActivityKit
 import EventKit
 import UserNotifications
 import WidgetKit
 
-// MARK: - CGColor → Hex (widget target)
+// MARK: - CGColor → Hex
 
 extension CGColor {
     var hexString: String {
@@ -32,12 +33,24 @@ struct CompleteEventIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         let store = EKEventStore()
+
+        // 리마인더 완료 처리
         if let reminder = store.calendarItem(withIdentifier: eventIdentifier) as? EKReminder {
             reminder.isCompleted = true
             try store.save(reminder, commit: true)
         }
+
+        // Live Activity 종료
+        for activity in Activity<TicActivityAttributes>.activities {
+            if activity.attributes.eventIdentifier == eventIdentifier {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+
+        // 위젯 캐시 갱신
         WidgetCache.save(events: buildUpdatedCache(store: store))
         WidgetCenter.shared.reloadAllTimelines()
+
         return .result()
     }
 
@@ -75,10 +88,17 @@ struct SnoozeEventIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         let center = UNUserNotificationCenter.current()
+
+        // 기존 알림 제거
+        center.removePendingNotificationRequests(withIdentifiers: ["\(eventIdentifier)-snooze"])
+
+        // 10분 후 알림 등록
         let content = UNMutableNotificationContent()
-        content.title = "스누즈 알림"
-        content.body = "스누즈한 일정이 있습니다."
+        content.title = "일정 알림"
+        content.body = "스누즈한 일정을 확인하세요."
         content.sound = .default
+        content.categoryIdentifier = "TIC_EVENT"
+
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 600, repeats: false)
         let request = UNNotificationRequest(
             identifier: "\(eventIdentifier)-snooze",
@@ -86,6 +106,18 @@ struct SnoozeEventIntent: AppIntent {
             trigger: trigger
         )
         try await center.add(request)
+
+        // Live Activity 업데이트 (스누즈 상태 표시)
+        for activity in Activity<TicActivityAttributes>.activities {
+            if activity.attributes.eventIdentifier == eventIdentifier {
+                // Activity를 유지하되 갱신
+                let state = activity.content.state
+                await activity.update(
+                    ActivityContent(state: state, staleDate: Date().addingTimeInterval(600))
+                )
+            }
+        }
+
         WidgetCenter.shared.reloadAllTimelines()
         return .result()
     }

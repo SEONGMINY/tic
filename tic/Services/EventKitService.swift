@@ -150,13 +150,55 @@ class EventKitService {
     }
 
     func hasEvents(on date: Date) -> Bool {
+        eventCount(on: date) > 0
+    }
+
+    func eventCount(on date: Date) -> Int {
         let start = date.startOfDay
         let end = date.endOfDay
         let calendars: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
             store.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
         }
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
-        return !store.events(matching: predicate).isEmpty
+        return store.events(matching: predicate).count
+    }
+
+    // 메모리 캐시: 월별 이벤트 수
+    private var monthCountsCache: [Date: [Int: Int]] = [:]
+
+    // 한 달 전체 이벤트 수를 한 번에 계산 (캐시 적용)
+    func eventCountsForMonth(_ monthStart: Date) -> [Int: Int] {
+        let key = monthStart.startOfMonth
+        if let cached = monthCountsCache[key] {
+            return cached
+        }
+
+        let calendar = Calendar.current
+        let monthEnd = calendar.date(byAdding: .month, value: 1, to: key)!
+
+        let cals: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
+            store.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
+        }
+        let predicate = store.predicateForEvents(withStart: key, end: monthEnd, calendars: cals)
+        let events = store.events(matching: predicate)
+
+        var counts: [Int: Int] = [:]
+        for event in events {
+            let eventStart = max(event.startDate, key)
+            let eventEnd = min(event.endDate, monthEnd)
+            var current = eventStart.startOfDay
+            while current < eventEnd {
+                let day = calendar.component(.day, from: current)
+                counts[day, default: 0] += 1
+                current = calendar.date(byAdding: .day, value: 1, to: current)!
+            }
+        }
+        monthCountsCache[key] = counts
+        return counts
+    }
+
+    func invalidateMonthCache() {
+        monthCountsCache.removeAll()
     }
 
     // MARK: - 쓰기
@@ -184,6 +226,8 @@ class EventKitService {
             event.addAlarm(EKAlarm(relativeOffset: TimeInterval(-alert.rawValue * 60)))
         }
         try store.save(event, span: .thisEvent)
+        lastChangeDate = Date()
+        updateWidgetCache()
         return event.eventIdentifier
     }
 
@@ -209,6 +253,8 @@ class EventKitService {
             reminder.addAlarm(EKAlarm(absoluteDate: dueDate.addingTimeInterval(TimeInterval(-alert.rawValue * 60))))
         }
         try store.save(reminder, commit: true)
+        lastChangeDate = Date()
+        updateWidgetCache()
         return reminder.calendarItemIdentifier
     }
 
@@ -254,6 +300,8 @@ class EventKitService {
             }
             try store.save(reminder, commit: true)
         }
+        lastChangeDate = Date()
+        updateWidgetCache()
     }
 
     func delete(_ item: TicItem) throws {
@@ -262,12 +310,16 @@ class EventKitService {
         } else if let reminder = item.ekReminder {
             try store.remove(reminder, commit: true)
         }
+        lastChangeDate = Date()
+        updateWidgetCache()
     }
 
     func complete(_ item: TicItem) throws {
         guard let reminder = item.ekReminder else { return }
         reminder.isCompleted = true
         try store.save(reminder, commit: true)
+        lastChangeDate = Date()
+        updateWidgetCache()
     }
 
     // MARK: - 캘린더 목록
@@ -310,6 +362,7 @@ class EventKitService {
             object: store,
             queue: .main
         ) { [weak self] _ in
+            self?.invalidateMonthCache()
             self?.lastChangeDate = Date()
             self?.updateWidgetCache()
         }

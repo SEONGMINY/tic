@@ -12,48 +12,60 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showEventForm = false
+    @Environment(\.scenePhase) private var scenePhase
     private let liveActivityTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            // 커스텀 네비게이션 바
+            navBar
+                .padding(.horizontal, 16)
+                .padding(.bottom, 4)
+                .padding(.top, 4)
+
+            // 메인 컨텐츠
             scopeView
-                .gesture(pinchGesture)
-                .animation(.easeInOut(duration: 0.3), value: viewModel.scope)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        leadingNavItem
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        trailingNavItems
-                    }
-                }
-                .sheet(isPresented: $showSettings) {
-                    SettingsView(eventKitService: eventKitService)
-                        .presentationDetents([.medium, .large])
-                }
-                .sheet(isPresented: $showEventForm) {
-                    EventFormView(
-                        viewModel: eventFormViewModel,
-                        eventKitService: eventKitService,
-                        notificationService: notificationService,
-                        onDismiss: { showEventForm = false }
-                    )
-                }
-                .navigationDestination(isPresented: $showSearch) {
-                    SearchView(
-                        eventKitService: eventKitService,
-                        notificationService: notificationService
-                    )
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .animation(.spring(duration: 0.35, bounce: 0.05), value: viewModel.scope)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(eventKitService: eventKitService)
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showEventForm) {
+            EventFormView(
+                viewModel: eventFormViewModel,
+                eventKitService: eventKitService,
+                notificationService: notificationService,
+                onDismiss: { showEventForm = false }
+            )
+        }
+        .sheet(isPresented: $showSearch) {
+            NavigationStack {
+                SearchView(
+                    eventKitService: eventKitService,
+                    notificationService: notificationService
+                )
+            }
+            .presentationDetents([.large])
         }
         .task {
             await eventKitService.requestCalendarAccess()
             await eventKitService.requestReminderAccess()
             eventKitService.startObservingChanges()
             applyCalendarSelections()
+            // 첫 실행 시 Live Activity 체크
+            await checkLiveActivity()
         }
         .onChange(of: calendarSelections.map(\.isEnabled)) {
             applyCalendarSelections()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                // 포그라운드 복귀 시 Live Activity 체크
+                Task { await checkLiveActivity() }
+            }
         }
         .onReceive(liveActivityTimer) { _ in
             Task { await checkLiveActivity() }
@@ -66,6 +78,79 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Navigation Bar
+
+    private var navBar: some View {
+        HStack {
+            leadingNavItem
+            Spacer()
+            trailingNavItems
+        }
+    }
+
+    @ViewBuilder
+    private var leadingNavItem: some View {
+        switch viewModel.scope {
+        case .year:
+            Button {
+                viewModel.goToToday()
+            } label: {
+                Text(verbatim: "\(viewModel.displayedYear)년")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.primary)
+            }
+        case .month:
+            Button {
+                withAnimation(.spring(duration: 0.4, bounce: 0.05)) {
+                    viewModel.scope = .year
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(verbatim: "\(viewModel.displayedYear)년")
+                        .font(.system(size: 17, weight: .semibold))
+                }
+                .foregroundStyle(.primary)
+            }
+        case .day:
+            Button {
+                withAnimation(.spring(duration: 0.4, bounce: 0.05)) {
+                    viewModel.scope = .month
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(verbatim: "\(viewModel.selectedDate.month)월 \(viewModel.selectedDate.year)년")
+                        .font(.system(size: 17, weight: .semibold))
+                }
+                .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    private var trailingNavItems: some View {
+        HStack(spacing: 14) {
+            Button { showSettings = true } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 15))
+            }
+            Button { showSearch = true } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15))
+            }
+            Button {
+                eventFormViewModel.prepareForCreate()
+                showEventForm = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 15))
+            }
+        }
+        .foregroundStyle(.primary)
+    }
+
     // MARK: - Scope View
 
     @ViewBuilder
@@ -73,8 +158,10 @@ struct ContentView: View {
         switch viewModel.scope {
         case .year:
             YearView(viewModel: viewModel, eventKitService: eventKitService)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
         case .month:
             MonthView(viewModel: viewModel, eventKitService: eventKitService)
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
         case .day:
             DayView(
                 viewModel: viewModel,
@@ -89,85 +176,8 @@ struct ContentView: View {
                     showEventForm = true
                 }
             )
+            .transition(.opacity.combined(with: .scale(scale: 1.02)))
         }
-    }
-
-    // MARK: - Navigation Bar
-
-    @ViewBuilder
-    private var leadingNavItem: some View {
-        switch viewModel.scope {
-        case .year:
-            Button {
-                viewModel.goToToday()
-            } label: {
-                Text("\(viewModel.displayedYear)년")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-        case .month:
-            Button {
-                viewModel.goToToday()
-            } label: {
-                Text("\(viewModel.displayedMonth.year)년")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-        case .day:
-            Button {
-                viewModel.scope = .month
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                    Text("\(viewModel.selectedDate.month)월")
-                }
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.primary)
-            }
-        }
-    }
-
-    private var trailingNavItems: some View {
-        HStack(spacing: 16) {
-            Button { showSettings = true } label: {
-                Image(systemName: "gearshape")
-            }
-            Button { showSearch = true } label: {
-                Image(systemName: "magnifyingglass")
-            }
-            Button {
-                eventFormViewModel.prepareForCreate()
-                showEventForm = true
-            } label: {
-                Image(systemName: "plus")
-            }
-        }
-        .foregroundStyle(.primary)
-    }
-
-    // MARK: - Pinch Gesture
-
-    private var pinchGesture: some Gesture {
-        MagnifyGesture()
-            .onEnded { value in
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    if value.magnification < 0.7 {
-                        // zoom out
-                        switch viewModel.scope {
-                        case .day: viewModel.scope = .month
-                        case .month: viewModel.scope = .year
-                        case .year: break
-                        }
-                    } else if value.magnification > 1.5 {
-                        // zoom in
-                        switch viewModel.scope {
-                        case .year: viewModel.scope = .month
-                        case .month: viewModel.scope = .day
-                        case .day: break
-                        }
-                    }
-                }
-            }
     }
 
     // MARK: - Live Activity 자동 시작
@@ -196,12 +206,10 @@ struct ContentView: View {
         if calendarSelections.isEmpty {
             eventKitService.enabledCalendarIdentifiers = nil
         } else {
-            let enabled = calendarSelections.filter(\.isEnabled).map(\.calendarIdentifier)
             let disabled = calendarSelections.filter { !$0.isEnabled }.map(\.calendarIdentifier)
             if disabled.isEmpty {
                 eventKitService.enabledCalendarIdentifiers = nil
             } else {
-                // 모든 캘린더 중 비활성화되지 않은 것만 포함
                 let allCalIds = eventKitService.availableCalendars().map(\.calendarIdentifier)
                 let allRemIds = eventKitService.availableReminderLists().map(\.calendarIdentifier)
                 let allIds = Set(allCalIds + allRemIds)

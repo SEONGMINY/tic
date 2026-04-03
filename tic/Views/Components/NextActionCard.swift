@@ -3,43 +3,80 @@ import SwiftUI
 struct NextActionCard: View {
     var item: TicItem
     var onComplete: () -> Void
+    @AppStorage("nextActionCardCollapsed") private var isCollapsed = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            // 좌측 오렌지 바
-            RoundedRectangle(cornerRadius: 2)
-                .fill(.orange)
-                .frame(width: 4)
-
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(.headline)
+        if isCollapsed {
+            // 접힌 상태: 작은 바
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isCollapsed = false
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(.orange)
+                        .frame(width: 6, height: 6)
+                    Text("다음: \(item.title)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-
-                    if let start = item.startDate {
-                        Text(timeDescription(for: start))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
                 }
-
-                Spacer()
-
-                if item.isReminder {
-                    Button(action: onComplete) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.title2)
-                            .foregroundStyle(.orange)
-                    }
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .buttonStyle(.plain)
+        } else {
+            // 펼친 상태
+            HStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(.orange)
+                    .frame(width: 3)
+
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .lineLimit(1)
+
+                        if let start = item.startDate {
+                            Text(timeDescription(for: start))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    if item.isReminder {
+                        Button(action: onComplete) {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 18))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isCollapsed = true
+                        }
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 16)
         }
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, 16)
     }
 
     private func timeDescription(for start: Date) -> String {

@@ -12,7 +12,7 @@ struct WidgetEventItem: Codable {
 }
 
 struct WidgetCache {
-    static let suiteName = "group.com.tic.app"
+    static let suiteName = "group.com.miny.tic"
     static let cacheKey = "widgetEventCache"
 
     static func save(events: [WidgetEventItem]) {

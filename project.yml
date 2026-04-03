@@ -9,10 +9,16 @@ options:
 
 settings:
   base:
-    CODE_SIGN_IDENTITY: ""
-    CODE_SIGNING_REQUIRED: "NO"
-    CODE_SIGNING_ALLOWED: "NO"
     SWIFT_VERSION: "5.9"
+
+schemes:
+  tic:
+    build:
+      targets:
+        tic: all
+        ticWidgets: all
+    run:
+      config: Debug
 
 targets:
   tic:
@@ -20,16 +26,27 @@ targets:
     platform: iOS
     sources:
       - path: tic
+    info:
+      path: tic/Info.plist
+      properties:
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSCalendarsUsageDescription: "tic에서 캘린더 일정을 확인하고 관리하기 위해 접근 권한이 필요합니다."
+        NSRemindersUsageDescription: "tic에서 미리 알림을 확인하고 관리하기 위해 접근 권한이 필요합니다."
+        NSSupportsLiveActivities: true
+        UILaunchScreen: {}
     settings:
       base:
-        INFOPLIST_FILE: tic/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.tic.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.miny.tic
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE: false
     entitlements:
       path: tic/tic.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.tic.app
+          - group.com.miny.tic
+    dependencies:
+      - target: ticWidgets
+        embed: true
 
   ticWidgets:
     type: app-extension
@@ -38,15 +55,18 @@ targets:
       - path: ticWidgets
       - path: tic/Models/TicActivityAttributes.swift
       - path: tic/Models/WidgetData.swift
+    info:
+      path: ticWidgets/Info.plist
+      properties:
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        INFOPLIST_FILE: ticWidgets/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.tic.app.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.miny.tic.widgets
     entitlements:
       path: ticWidgets/ticWidgets.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.tic.app
-    dependencies:
-      - target: tic
-        embed: false
+          - group.com.miny.tic

@@ -7,6 +7,7 @@ struct MediumTicWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TicWidgetProvider()) { entry in
             MediumWidgetView(entry: entry)
+                .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("tic")
         .description("오늘의 일정을 한눈에")
@@ -109,7 +110,6 @@ struct MediumWidgetView: View {
                 }
             }
         }
-        .padding(12)
         .widgetURL(URL(string: "tic://day?date=\(dateString)")!)
     }
 }
