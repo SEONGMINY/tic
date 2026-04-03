@@ -15,7 +15,9 @@
     {
       "phase": 1,
       "name": "widget-redesign",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-04-03T22:57:30+0900",
+      "completed_at": "2026-04-03T22:59:30+0900"
     }
   ]
 }
