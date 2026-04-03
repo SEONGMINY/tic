@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct ticApp: App {
@@ -6,5 +7,6 @@ struct ticApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: [SearchHistory.self, CalendarSelection.self, NotificationMeta.self])
     }
 }
