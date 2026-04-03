@@ -1,0 +1,50 @@
+name: tic
+options:
+  bundleIdPrefix: com.tic
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  groupSortPosition: top
+  createIntermediateGroups: true
+
+settings:
+  base:
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+    SWIFT_VERSION: "5.9"
+
+targets:
+  tic:
+    type: application
+    platform: iOS
+    sources:
+      - path: tic
+    settings:
+      base:
+        INFOPLIST_FILE: tic/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.tic.app
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE: false
+    entitlements:
+      path: tic/tic.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.tic.app
+
+  ticWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ticWidgets
+    settings:
+      base:
+        INFOPLIST_FILE: ticWidgets/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.tic.app.widgets
+    entitlements:
+      path: ticWidgets/ticWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.tic.app
+    dependencies:
+      - target: tic
+        embed: false
