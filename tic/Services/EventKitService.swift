@@ -45,6 +45,7 @@ class EventKitService {
     var calendarAccessGranted = false
     var reminderAccessGranted = false
     var lastChangeDate = Date()
+    var enabledCalendarIdentifiers: Set<String>?
 
     // MARK: - 권한 요청
 
@@ -71,7 +72,10 @@ class EventKitService {
     // MARK: - 읽기
 
     func fetchEvents(from start: Date, to end: Date) -> [TicItem] {
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        let calendars: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
+            store.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
+        }
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
         let events = store.events(matching: predicate)
         return events.map { event in
             TicItem(
@@ -94,15 +98,18 @@ class EventKitService {
     }
 
     func fetchReminders(from start: Date?, to end: Date?) async -> [TicItem] {
+        let reminderCalendars: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
+            store.calendars(for: .reminder).filter { ids.contains($0.calendarIdentifier) }
+        }
         let predicate: NSPredicate
         if let start, let end {
             predicate = store.predicateForIncompleteReminders(
                 withDueDateStarting: start,
                 ending: end,
-                calendars: nil
+                calendars: reminderCalendars
             )
         } else {
-            predicate = store.predicateForReminders(in: nil)
+            predicate = store.predicateForReminders(in: reminderCalendars)
         }
 
         let reminders: [EKReminder] = await withCheckedContinuation { continuation in
@@ -144,7 +151,10 @@ class EventKitService {
     func hasEvents(on date: Date) -> Bool {
         let start = date.startOfDay
         let end = date.endOfDay
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        let calendars: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
+            store.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
+        }
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
         return !store.events(matching: predicate).isEmpty
     }
 

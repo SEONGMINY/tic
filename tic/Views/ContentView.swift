@@ -1,6 +1,8 @@
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
+    @Query private var calendarSelections: [CalendarSelection]
     @State private var viewModel = CalendarViewModel()
     @State private var eventKitService = EventKitService()
     @State private var dayViewModel = DayViewModel()
@@ -24,8 +26,8 @@ struct ContentView: View {
                     }
                 }
                 .sheet(isPresented: $showSettings) {
-                    Text("설정 — Phase 5에서 구현")
-                        .presentationDetents([.medium])
+                    SettingsView(eventKitService: eventKitService)
+                        .presentationDetents([.medium, .large])
                 }
                 .sheet(isPresented: $showEventForm) {
                     EventFormView(
@@ -36,13 +38,20 @@ struct ContentView: View {
                     )
                 }
                 .navigationDestination(isPresented: $showSearch) {
-                    Text("검색 — Phase 5에서 구현")
+                    SearchView(
+                        eventKitService: eventKitService,
+                        notificationService: notificationService
+                    )
                 }
         }
         .task {
             await eventKitService.requestCalendarAccess()
             await eventKitService.requestReminderAccess()
             eventKitService.startObservingChanges()
+            applyCalendarSelections()
+        }
+        .onChange(of: calendarSelections.map(\.isEnabled)) {
+            applyCalendarSelections()
         }
     }
 
@@ -148,5 +157,26 @@ struct ContentView: View {
                     }
                 }
             }
+    }
+
+    // MARK: - CalendarSelection 반영
+
+    private func applyCalendarSelections() {
+        if calendarSelections.isEmpty {
+            eventKitService.enabledCalendarIdentifiers = nil
+        } else {
+            let enabled = calendarSelections.filter(\.isEnabled).map(\.calendarIdentifier)
+            let disabled = calendarSelections.filter { !$0.isEnabled }.map(\.calendarIdentifier)
+            if disabled.isEmpty {
+                eventKitService.enabledCalendarIdentifiers = nil
+            } else {
+                // 모든 캘린더 중 비활성화되지 않은 것만 포함
+                let allCalIds = eventKitService.availableCalendars().map(\.calendarIdentifier)
+                let allRemIds = eventKitService.availableReminderLists().map(\.calendarIdentifier)
+                let allIds = Set(allCalIds + allRemIds)
+                let disabledSet = Set(disabled)
+                eventKitService.enabledCalendarIdentifiers = allIds.subtracting(disabledSet)
+            }
+        }
     }
 }
