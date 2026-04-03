@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var viewModel = CalendarViewModel()
     @State private var eventKitService = EventKitService()
+    @State private var dayViewModel = DayViewModel()
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showEventForm = false
@@ -49,12 +50,11 @@ struct ContentView: View {
         case .month:
             MonthView(viewModel: viewModel, eventKitService: eventKitService)
         case .day:
-            VStack {
-                Spacer()
-                Text("일간 뷰 — Phase 3에서 구현")
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
+            DayView(
+                viewModel: viewModel,
+                dayViewModel: dayViewModel,
+                eventKitService: eventKitService
+            )
         }
     }
 
