@@ -131,21 +131,30 @@ struct ContentView: View {
     }
 
     private var trailingNavItems: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 18) {
             Button { showSettings = true } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 15))
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 32, height: 32)
+                    .background(Color(.systemGray5))
+                    .clipShape(Circle())
             }
             Button { showSearch = true } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15))
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 32, height: 32)
+                    .background(Color(.systemGray5))
+                    .clipShape(Circle())
             }
             Button {
                 eventFormViewModel.prepareForCreate()
                 showEventForm = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 15))
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 32, height: 32)
+                    .background(Color(.systemGray5))
+                    .clipShape(Circle())
             }
         }
         .foregroundStyle(.primary)
