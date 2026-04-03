@@ -6,64 +6,48 @@ struct TicLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TicActivityAttributes.self) { context in
             LockScreenView(context: context)
-                .activityBackgroundTint(.black.opacity(0.75))
+                .activityBackgroundTint(.black.opacity(0.8))
         } dynamicIsland: { context in
             DynamicIsland {
                 // MARK: - Expanded
                 DynamicIslandExpandedRegion(.leading) {
                     Text(context.state.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 16, weight: .bold))
                         .lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(remainingTimeCompact(start: context.state.startDate, end: context.state.endDate))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.orange)
-                        .monospacedDigit()
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.orange)
+                        Text("tic")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color.orange)
+                    }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 10) {
-                        // 프로그레스 바 + 시간
-                        VStack(spacing: 5) {
-                            ProgressBarView(
-                                startDate: context.state.startDate,
-                                endDate: context.state.endDate
-                            )
-                            HStack {
-                                Text(formatTime(context.state.startDate))
-                                    .font(.system(size: 10, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                                Spacer()
-                                Text(formatTime(context.state.endDate))
-                                    .font(.system(size: 10, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
-                        }
+                    VStack(spacing: 8) {
+                        JourneyProgressView(
+                            startDate: context.state.startDate,
+                            endDate: context.state.endDate,
+                            showTimes: true,
+                            height: 4
+                        )
 
-                        // 액션 버튼 (둥근 배경)
-                        HStack(spacing: 8) {
-                            Button(intent: CompleteEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
-                                Text("완료")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 6)
-                                    .background(Color.orange.opacity(0.2))
+                        HStack {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(Color.orange)
+                                    .frame(width: 7, height: 7)
+                                Text("진행 중")
+                                    .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(Color.orange)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
-                            .buttonStyle(.plain)
-                            Button(intent: SnoozeEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
-                                Text("10분 후")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 6)
-                                    .background(Color.white.opacity(0.1))
-                                    .foregroundStyle(.primary)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
+                            Spacer()
+                            Text(remainingTimeCompact(start: context.state.startDate, end: context.state.endDate) + " 남음")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
                     }
                 }
@@ -96,31 +80,76 @@ struct TicLiveActivity: Widget {
     }
 }
 
-// MARK: - Progress Bar
+// MARK: - Journey Progress View
 
-private struct ProgressBarView: View {
+struct JourneyProgressView: View {
     let startDate: Date
     let endDate: Date
+    let showTimes: Bool
+    let height: CGFloat
 
     var body: some View {
-        GeometryReader { geometry in
-            let progress = progressValue(start: startDate, end: endDate)
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(height: 5)
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.orange, Color.orange.opacity(0.8)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: max(geometry.size.width * progress, 5), height: 5)
+        let progress = progressValue(start: startDate, end: endDate)
+
+        VStack(spacing: 6) {
+            GeometryReader { geometry in
+                let totalWidth = geometry.size.width
+                let iconPosition = totalWidth * progress
+
+                ZStack(alignment: .leading) {
+                    // 시작 점
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: height + 4, height: height + 4)
+                        .position(x: 0, y: height / 2)
+
+                    // 진행된 부분 — 오렌지 실선
+                    if progress > 0 {
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: height / 2))
+                            path.addLine(to: CGPoint(x: iconPosition, y: height / 2))
+                        }
+                        .stroke(Color.orange, style: StrokeStyle(lineWidth: height, lineCap: .round))
+                    }
+
+                    // 남은 부분 — 회색 점선
+                    if progress < 1 {
+                        Path { path in
+                            path.move(to: CGPoint(x: iconPosition, y: height / 2))
+                            path.addLine(to: CGPoint(x: totalWidth, y: height / 2))
+                        }
+                        .stroke(Color.gray.opacity(0.4), style: StrokeStyle(lineWidth: height, lineCap: .round, dash: [4, 4]))
+                    }
+
+                    // 종료 점
+                    Circle()
+                        .stroke(Color.gray.opacity(0.5), lineWidth: 1.5)
+                        .frame(width: height + 4, height: height + 4)
+                        .position(x: totalWidth, y: height / 2)
+
+                    // 시계 아이콘 — 현재 진행 위치
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                        .position(x: iconPosition, y: height / 2)
+                }
+            }
+            .frame(height: max(height + 4, 16))
+
+            if showTimes {
+                HStack {
+                    Text(formatTime(startDate))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(formatTime(endDate))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                }
             }
         }
-        .frame(height: 5)
     }
 }
 
@@ -130,47 +159,40 @@ private struct LockScreenView: View {
     let context: ActivityViewContext<TicActivityAttributes>
 
     var body: some View {
-        VStack(spacing: 12) {
-            // 상단: tic + 남은 시간
+        VStack(spacing: 14) {
+            // 상단: tic 로고(좌) + 일정 제목(우)
             HStack {
                 Text("tic")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Color.orange)
                 Spacer()
-                Text(remainingTimeCompact(start: context.state.startDate, end: context.state.endDate) + " 남음")
+                Text(context.state.title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .lineLimit(1)
+            }
+
+            // 중앙: 시각적 여정 프로그레스
+            JourneyProgressView(
+                startDate: context.state.startDate,
+                endDate: context.state.endDate,
+                showTimes: true,
+                height: 4
+            )
+
+            // 하단 상태
+            HStack {
+                Text("시작됨 " + formatTime(context.state.startDate))
                     .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Spacer()
+                Text(remainingTimeCompact(start: context.state.startDate, end: context.state.endDate) + " 남음")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.orange)
                     .monospacedDigit()
             }
 
-            // 제목
-            HStack {
-                Text(context.state.title)
-                    .font(.system(size: 18, weight: .semibold))
-                    .lineLimit(1)
-                Spacer()
-            }
-
-            // 프로그레스 바 + 시간
-            VStack(spacing: 5) {
-                ProgressBarView(
-                    startDate: context.state.startDate,
-                    endDate: context.state.endDate
-                )
-                HStack {
-                    Text(formatTime(context.state.startDate))
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                    Spacer()
-                    Text(formatTime(context.state.endDate))
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-            }
-
-            // 액션 버튼 (둥근 배경)
+            // 액션 버튼
             HStack(spacing: 10) {
                 Button(intent: CompleteEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
                     Text("완료")
