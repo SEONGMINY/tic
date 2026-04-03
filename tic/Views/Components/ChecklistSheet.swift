@@ -3,6 +3,8 @@ import SwiftUI
 struct ChecklistSheet: View {
     var reminders: [TicItem]
     var onToggle: (TicItem) -> Void
+    var onEdit: ((TicItem) -> Void)?
+    var onDelete: ((TicItem) -> Void)?
 
     var body: some View {
         NavigationStack {
@@ -19,6 +21,13 @@ struct ChecklistSheet: View {
                             Text(item.title)
                                 .strikethrough(item.isCompleted)
                                 .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                        }
+                    }
+                    .contextMenu {
+                        Button("수정") { onEdit?(item) }
+                        Button("삭제", role: .destructive) { onDelete?(item) }
+                        if !item.isCompleted {
+                            Button("완료") { onToggle(item) }
                         }
                     }
                 }

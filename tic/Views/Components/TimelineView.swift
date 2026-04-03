@@ -6,6 +6,9 @@ struct TimelineView: View {
     var selectedDate: Date
     var onEventTap: (TicItem) -> Void
     var onTimeSlotLongPress: (Date) -> Void
+    var onEditItem: (TicItem) -> Void
+    var onDeleteItem: (TicItem) -> Void
+    var onCompleteItem: (TicItem) -> Void
 
     let hourHeight: CGFloat = 60
     private let timeColumnWidth: CGFloat = 52
@@ -126,6 +129,13 @@ struct TimelineView: View {
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("수정") { onEditItem(item) }
+            Button("삭제", role: .destructive) { onDeleteItem(item) }
+            if item.isReminder {
+                Button("완료") { onCompleteItem(item) }
+            }
+        }
         .offset(x: xPos, y: yPos)
     }
 

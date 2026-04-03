@@ -4,6 +4,8 @@ struct ContentView: View {
     @State private var viewModel = CalendarViewModel()
     @State private var eventKitService = EventKitService()
     @State private var dayViewModel = DayViewModel()
+    @State private var notificationService = NotificationService()
+    @State private var eventFormViewModel = EventFormViewModel()
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showEventForm = false
@@ -26,8 +28,12 @@ struct ContentView: View {
                         .presentationDetents([.medium])
                 }
                 .sheet(isPresented: $showEventForm) {
-                    Text("일정 생성 — Phase 4에서 구현")
-                        .presentationDetents([.medium])
+                    EventFormView(
+                        viewModel: eventFormViewModel,
+                        eventKitService: eventKitService,
+                        notificationService: notificationService,
+                        onDismiss: { showEventForm = false }
+                    )
                 }
                 .navigationDestination(isPresented: $showSearch) {
                     Text("검색 — Phase 5에서 구현")
@@ -53,7 +59,15 @@ struct ContentView: View {
             DayView(
                 viewModel: viewModel,
                 dayViewModel: dayViewModel,
-                eventKitService: eventKitService
+                eventKitService: eventKitService,
+                onEditItem: { item in
+                    eventFormViewModel.prepareForEdit(item, service: eventKitService)
+                    showEventForm = true
+                },
+                onCreateAtDate: { date in
+                    eventFormViewModel.prepareForCreate(at: date)
+                    showEventForm = true
+                }
             )
         }
     }
@@ -101,7 +115,10 @@ struct ContentView: View {
             Button { showSearch = true } label: {
                 Image(systemName: "magnifyingglass")
             }
-            Button { showEventForm = true } label: {
+            Button {
+                eventFormViewModel.prepareForCreate()
+                showEventForm = true
+            } label: {
                 Image(systemName: "plus")
             }
         }
