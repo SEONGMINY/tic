@@ -5,6 +5,7 @@ import SwiftUI
 struct TicWidgetBundle: WidgetBundle {
     var body: some Widget {
         TicPlaceholderWidget()
+        TicLiveActivity()
     }
 }
 

@@ -8,9 +8,11 @@ struct ContentView: View {
     @State private var dayViewModel = DayViewModel()
     @State private var notificationService = NotificationService()
     @State private var eventFormViewModel = EventFormViewModel()
+    @State private var liveActivityService = LiveActivityService()
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showEventForm = false
+    private let liveActivityTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
@@ -52,6 +54,9 @@ struct ContentView: View {
         }
         .onChange(of: calendarSelections.map(\.isEnabled)) {
             applyCalendarSelections()
+        }
+        .onReceive(liveActivityTimer) { _ in
+            Task { await checkLiveActivity() }
         }
     }
 
@@ -157,6 +162,26 @@ struct ContentView: View {
                     }
                 }
             }
+    }
+
+    // MARK: - Live Activity 자동 시작
+
+    private func checkLiveActivity() async {
+        let now = Date()
+        let items = await eventKitService.fetchAllItems(for: now)
+        let upcoming = items.filter { item in
+            guard let start = item.startDate, let end = item.endDate else { return false }
+            let minutesBefore = start.timeIntervalSince(now) / 60
+            return minutesBefore <= 30 && end > now && !item.isAllDay
+        }.first
+
+        if let next = upcoming {
+            if !liveActivityService.isActivityActive {
+                try? liveActivityService.start(for: next)
+            }
+        } else if liveActivityService.isActivityActive {
+            liveActivityService.endAll()
+        }
     }
 
     // MARK: - CalendarSelection 반영
