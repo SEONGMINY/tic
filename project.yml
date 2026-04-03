@@ -37,6 +37,7 @@ targets:
     sources:
       - path: ticWidgets
       - path: tic/Models/TicActivityAttributes.swift
+      - path: tic/Models/WidgetData.swift
     settings:
       base:
         INFOPLIST_FILE: ticWidgets/Info.plist

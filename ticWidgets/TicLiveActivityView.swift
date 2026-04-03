@@ -25,8 +25,7 @@ struct TicLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack(spacing: 12) {
-                        Button {
-                        } label: {
+                        Button(intent: CompleteEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
                             Text("완료")
                                 .font(.system(size: 14, weight: .medium))
                                 .frame(maxWidth: .infinity)
@@ -35,8 +34,7 @@ struct TicLiveActivity: Widget {
                                 .foregroundStyle(Color.orange)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
-                        Button {
-                        } label: {
+                        Button(intent: SnoozeEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
                             Text("10분 후 알림")
                                 .font(.system(size: 14, weight: .medium))
                                 .frame(maxWidth: .infinity)
@@ -89,8 +87,7 @@ private struct LockScreenView: View {
 
             // Action Buttons
             HStack(spacing: 12) {
-                Button {
-                } label: {
+                Button(intent: CompleteEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
                     Text("완료")
                         .font(.system(size: 14, weight: .medium))
                         .frame(maxWidth: .infinity)
@@ -99,8 +96,7 @@ private struct LockScreenView: View {
                         .foregroundStyle(Color.orange)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                Button {
-                } label: {
+                Button(intent: SnoozeEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
                     Text("10분 후 알림")
                         .font(.system(size: 14, weight: .medium))
                         .frame(maxWidth: .infinity)

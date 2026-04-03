@@ -1,6 +1,10 @@
 import SwiftUI
 import SwiftData
 
+extension Notification.Name {
+    static let ticDeepLinkDate = Notification.Name("ticDeepLinkDate")
+}
+
 @main
 struct ticApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -8,8 +12,20 @@ struct ticApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .onOpenURL { _ in
-                    // 딥링크 처리 (위젯 → 앱) — Phase 7에서 완성
+                .onOpenURL { url in
+                    guard url.scheme == "tic", url.host == "day" else { return }
+                    if let dateString = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                        .queryItems?.first(where: { $0.name == "date" })?.value {
+                        let formatter = DateFormatter()
+                        formatter.dateFormat = "yyyy-MM-dd"
+                        if let date = formatter.date(from: dateString) {
+                            NotificationCenter.default.post(
+                                name: .ticDeepLinkDate,
+                                object: nil,
+                                userInfo: ["date": date]
+                            )
+                        }
+                    }
                 }
         }
         .modelContainer(for: [SearchHistory.self, CalendarSelection.self, NotificationMeta.self])

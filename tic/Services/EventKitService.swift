@@ -1,5 +1,6 @@
 import EventKit
 import SwiftUI
+import WidgetKit
 
 enum RecurrenceOption: String, CaseIterable {
     case none = "없음"
@@ -279,6 +280,28 @@ class EventKitService {
         store.calendars(for: .reminder)
     }
 
+    // MARK: - 위젯 캐시
+
+    func updateWidgetCache() {
+        let now = Date()
+        let end = now.adding(days: 7)
+        let events = fetchEvents(from: now, to: end)
+        let widgetItems = Array(events.prefix(20).map { item in
+            WidgetEventItem(
+                id: item.id,
+                title: item.title,
+                startDate: item.startDate,
+                endDate: item.endDate,
+                isReminder: item.isReminder,
+                isCompleted: item.isCompleted,
+                calendarColorHex: item.calendarColor.hexString,
+                isAllDay: item.isAllDay
+            )
+        })
+        WidgetCache.save(events: widgetItems)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
     // MARK: - 변경 감지
 
     func startObservingChanges() {
@@ -288,6 +311,7 @@ class EventKitService {
             queue: .main
         ) { [weak self] _ in
             self?.lastChangeDate = Date()
+            self?.updateWidgetCache()
         }
     }
 }

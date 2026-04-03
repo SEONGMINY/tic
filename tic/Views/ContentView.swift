@@ -58,6 +58,12 @@ struct ContentView: View {
         .onReceive(liveActivityTimer) { _ in
             Task { await checkLiveActivity() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .ticDeepLinkDate)) { notification in
+            if let date = notification.userInfo?["date"] as? Date {
+                viewModel.selectedDate = date
+                viewModel.scope = .day
+            }
+        }
     }
 
     // MARK: - Scope View
