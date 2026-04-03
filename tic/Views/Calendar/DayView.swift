@@ -172,7 +172,10 @@ struct DayView: View {
                 let isToday = date.isToday
 
                 Button {
-                    withAnimation(.easeOut(duration: 0.15)) {
+                    let direction: Edge = date > viewModel.selectedDate ? .trailing : .leading
+                    slideDirection = direction
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        contentId = UUID()
                         viewModel.selectedDate = date
                     }
                 } label: {
