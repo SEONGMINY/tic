@@ -15,32 +15,57 @@ struct MonthView: View {
     private let rangeStart = -120
     private let rangeEnd = 120
 
+    @State private var scrollToThisMonthTrigger = false
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(spacing: 0) {
-                    ForEach(rangeStart...rangeEnd, id: \.self) { offset in
-                        let month = Self.monthDate(offset: offset)
-                        MonthSection(
-                            month: month,
-                            viewModel: viewModel,
-                            eventKitService: eventKitService,
-                            columns: columns,
-                            weekdays: weekdays
-                        )
-                        .id(offset)
-                        .onAppear {
-                            viewModel.displayedYear = month.year
+        ZStack(alignment: .bottomLeading) {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(rangeStart...rangeEnd, id: \.self) { offset in
+                            let month = Self.monthDate(offset: offset)
+                            MonthSection(
+                                month: month,
+                                viewModel: viewModel,
+                                eventKitService: eventKitService,
+                                columns: columns,
+                                weekdays: weekdays
+                            )
+                            .id(offset)
+                            .onAppear {
+                                viewModel.displayedYear = month.year
+                            }
                         }
                     }
                 }
-            }
-            .onAppear {
-                let targetOffset = Self.offsetForDate(viewModel.displayedMonth)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    proxy.scrollTo(targetOffset, anchor: .top)
+                .onAppear {
+                    let targetOffset = Self.offsetForDate(viewModel.displayedMonth)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        proxy.scrollTo(targetOffset, anchor: .top)
+                    }
+                }
+                .onChange(of: scrollToThisMonthTrigger) { _, _ in
+                    let currentOffset = Self.offsetForDate(Date())
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        proxy.scrollTo(currentOffset, anchor: .top)
+                    }
                 }
             }
+
+            // 이번달 버튼
+            Button {
+                scrollToThisMonthTrigger.toggle()
+            } label: {
+                Text("이번달")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+            }
+            .padding(.leading, 16)
+            .padding(.bottom, 16)
         }
     }
 

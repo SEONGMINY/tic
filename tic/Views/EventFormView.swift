@@ -47,9 +47,47 @@ struct EventFormView: View {
         )
     }
 
+    /// The list to show in the calendar picker, based on current type
+    private var calendarListForCurrentType: [EKCalendar] {
+        viewModel.isCalendarType ? allCalendars : allReminderLists
+    }
+
+    private var datePickerComponents: DatePickerComponents {
+        viewModel.isAllDay ? [.date] : [.date, .hourAndMinute]
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                // Segmented Control (생성 모드에서만)
+                if !viewModel.isEditMode {
+                    Picker("타입", selection: $viewModel.isCalendarType) {
+                        Text("이벤트").tag(true)
+                        Text("미리 알림").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .onChange(of: viewModel.isCalendarType) { oldValue, newValue in
+                        guard oldValue != newValue else { return }
+                        viewModel.selectedCalendar = nil
+                        if newValue {
+                            // 미리 알림 → 이벤트: 기본 시간 세팅
+                            if viewModel.startDate == nil || viewModel.endDate == nil {
+                                let calendar = Calendar.current
+                                var components = calendar.dateComponents([.year, .month, .day], from: Date())
+                                components.hour = 9
+                                components.minute = 0
+                                viewModel.startDate = calendar.date(from: components)
+                                components.hour = 10
+                                viewModel.endDate = calendar.date(from: components)
+                            }
+                        }
+                    }
+                }
+
                 // 제목
                 Section {
                     TextField("제목", text: $viewModel.title)
@@ -69,29 +107,11 @@ struct EventFormView: View {
                             .font(.system(size: 14))
                         Spacer()
                         Menu {
-                            // 캘린더 섹션
-                            if !allCalendars.isEmpty {
-                                Section("캘린더") {
-                                    ForEach(allCalendars, id: \.calendarIdentifier) { cal in
-                                        Button {
-                                            selectedCalendarId.wrappedValue = cal.calendarIdentifier
-                                        } label: {
-                                            Label(cal.title, systemImage: "calendar")
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 미리 알림 섹션
-                            if !allReminderLists.isEmpty {
-                                Section("미리 알림") {
-                                    ForEach(allReminderLists, id: \.calendarIdentifier) { list in
-                                        Button {
-                                            selectedCalendarId.wrappedValue = list.calendarIdentifier
-                                        } label: {
-                                            Label(list.title, systemImage: "checklist")
-                                        }
-                                    }
+                            ForEach(calendarListForCurrentType, id: \.calendarIdentifier) { cal in
+                                Button {
+                                    selectedCalendarId.wrappedValue = cal.calendarIdentifier
+                                } label: {
+                                    Label(cal.title, systemImage: viewModel.isCalendarType ? "calendar" : "checklist")
                                 }
                             }
                         } label: {
@@ -119,6 +139,8 @@ struct EventFormView: View {
                 // 시간
                 if viewModel.isCalendarType {
                     Section {
+                        Toggle("하루 종일", isOn: $viewModel.isAllDay)
+                            .font(.system(size: 14))
                         DatePicker(
                             "시작",
                             selection: Binding(
@@ -130,7 +152,7 @@ struct EventFormView: View {
                                     }
                                 }
                             ),
-                            displayedComponents: [.date, .hourAndMinute]
+                            displayedComponents: datePickerComponents
                         )
                         .font(.system(size: 14))
                         DatePicker(
@@ -140,7 +162,7 @@ struct EventFormView: View {
                                 set: { viewModel.endDate = $0 }
                             ),
                             in: (viewModel.startDate ?? Date())...,
-                            displayedComponents: [.date, .hourAndMinute]
+                            displayedComponents: datePickerComponents
                         )
                         .font(.system(size: 14))
                     }
@@ -202,6 +224,8 @@ struct EventFormView: View {
                     }
                 }
             }
+            .listSectionSpacing(.compact)
+            .environment(\.defaultMinListRowHeight, 44)
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(viewModel.isEditMode ? "일정 수정" : "새 일정")
             .navigationBarTitleDisplayMode(.inline)

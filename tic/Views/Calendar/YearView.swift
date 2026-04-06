@@ -50,7 +50,7 @@ struct YearView: View {
             Button {
                 scrollToTodayTrigger.toggle()
             } label: {
-                Text("오늘")
+                Text("올해")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 16)
