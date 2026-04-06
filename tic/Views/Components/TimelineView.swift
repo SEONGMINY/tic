@@ -21,6 +21,7 @@ struct TimelineView: View {
     var onResizeItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onMoveItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onDuplicateItem: (_ itemId: String) -> Void
+    var onCrossDayDragStart: ((_ item: TicItem, _ horizontalTranslation: CGFloat) -> Void)?
 
     let hourHeight: CGFloat = 60
     private let timeColumnWidth: CGFloat = 52
@@ -97,7 +98,8 @@ struct TimelineView: View {
                                 onDeleteItem: onDeleteItem,
                                 onResizeItem: onResizeItem,
                                 onMoveItem: onMoveItem,
-                                onDuplicateItem: onDuplicateItem
+                                onDuplicateItem: onDuplicateItem,
+                                onCrossDayDragStart: onCrossDayDragStart
                             )
                         }
                         .zIndex(3)

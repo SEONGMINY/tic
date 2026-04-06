@@ -1,5 +1,16 @@
 import SwiftUI
 
+struct CrossDayDragState {
+    let item: TicItem
+    let originalStart: Date
+    let originalEnd: Date
+    let originalDate: Date
+    var currentOffset: CGSize
+    var targetDate: Date
+    var targetHour: Int
+    var targetMinute: Int
+}
+
 struct DayView: View {
     var viewModel: CalendarViewModel
     var dayViewModel: DayViewModel
@@ -23,6 +34,10 @@ struct DayView: View {
     // Edit mode state
     @State private var editingItemId: String?
     @State private var showEditToolbar: Bool = true
+
+    // Cross-day drag state
+    @State private var crossDayDrag: CrossDayDragState?
+    @State private var crossDayLastTransitionX: CGFloat = 0
 
     @Namespace private var dayAnimation
 
@@ -93,6 +108,9 @@ struct DayView: View {
                             if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
                                 try? eventKitService.duplicate(item)
                             }
+                        },
+                        onCrossDayDragStart: { item, horizontalTranslation in
+                            handleCrossDayDragStart(item: item, horizontalTranslation: horizontalTranslation)
                         }
                     )
                 }
@@ -131,6 +149,9 @@ struct DayView: View {
                 if showFAB {
                     fabButton
                 }
+            }
+            .overlay {
+                crossDayDragOverlay
             }
         }
         .task {
@@ -324,6 +345,131 @@ struct DayView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Cross-Day Drag
+
+    private func handleCrossDayDragStart(item: TicItem, horizontalTranslation: CGFloat) {
+        guard let start = item.startDate, let end = item.endDate else { return }
+
+        let direction: Int = horizontalTranslation > 0 ? -1 : 1
+        let newDate = viewModel.selectedDate.adding(days: direction)
+
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: start)
+        let minute = calendar.component(.minute, from: start)
+
+        crossDayDrag = CrossDayDragState(
+            item: item,
+            originalStart: start,
+            originalEnd: end,
+            originalDate: viewModel.selectedDate,
+            currentOffset: .zero,
+            targetDate: newDate,
+            targetHour: hour,
+            targetMinute: minute
+        )
+        crossDayLastTransitionX = 0
+
+        slideDirection = direction > 0 ? .trailing : .leading
+        withAnimation(.easeInOut(duration: 0.25)) {
+            contentId = UUID()
+            weekStripId = UUID()
+            viewModel.selectedDate = newDate
+        }
+    }
+
+    @ViewBuilder
+    private var crossDayDragOverlay: some View {
+        if let drag = crossDayDrag {
+            let blockColor = Color(cgColor: drag.item.calendarColor)
+            let duration = drag.originalEnd.timeIntervalSince(drag.originalStart) / 3600.0
+            let blockHeight = max(CGFloat(duration) * 60, 16)
+
+            RoundedRectangle(cornerRadius: 4)
+                .fill(blockColor.opacity(0.85))
+                .overlay(alignment: .topLeading) {
+                    Text(drag.item.title)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(4)
+                }
+                .frame(
+                    width: UIScreen.main.bounds.width - 60,
+                    height: blockHeight
+                )
+                .shadow(radius: 8, y: 4)
+                .position(
+                    x: UIScreen.main.bounds.width / 2 + 4,
+                    y: 200 + drag.currentOffset.height
+                )
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            crossDayDrag?.currentOffset = value.translation
+
+                            // Additional date transition on continued horizontal drag
+                            let deltaX = value.translation.width - crossDayLastTransitionX
+                            if abs(deltaX) > 60 {
+                                let dir: Int = deltaX > 0 ? -1 : 1
+                                let nextDate = (crossDayDrag?.targetDate ?? viewModel.selectedDate).adding(days: dir)
+                                crossDayDrag?.targetDate = nextDate
+                                crossDayLastTransitionX = value.translation.width
+
+                                slideDirection = dir > 0 ? .trailing : .leading
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    contentId = UUID()
+                                    weekStripId = UUID()
+                                    viewModel.selectedDate = nextDate
+                                }
+                            }
+                        }
+                        .onEnded { value in
+                            // Cancel: small translation → return to original date
+                            if abs(value.translation.height) < 20 && abs(value.translation.width) < 30 {
+                                if let d = crossDayDrag, d.targetDate != d.originalDate {
+                                    let dir: Edge = d.originalDate < d.targetDate ? .leading : .trailing
+                                    slideDirection = dir
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        contentId = UUID()
+                                        weekStripId = UUID()
+                                        viewModel.selectedDate = d.originalDate
+                                    }
+                                }
+                                crossDayDrag = nil
+                                // editingItemId is kept — edit mode maintained
+                                return
+                            }
+                            commitCrossDayDrag(finalTranslation: value.translation)
+                        }
+                )
+        }
+    }
+
+    private func commitCrossDayDrag(finalTranslation: CGSize) {
+        guard let drag = crossDayDrag else { return }
+
+        let hourHeight: CGFloat = 60
+        let baseY = CGFloat(drag.targetHour) * hourHeight + CGFloat(drag.targetMinute) / 60.0 * hourHeight
+        let finalY = max(0, baseY + finalTranslation.height)
+
+        let hour = max(0, min(23, Int(finalY / hourHeight)))
+        let minuteFraction = (finalY - CGFloat(hour) * hourHeight) / hourHeight
+        let minute = max(0, min(45, Int(round(minuteFraction * 4)) * 15))
+
+        let calendar = Calendar.current
+        let duration = drag.originalEnd.timeIntervalSince(drag.originalStart)
+        var components = calendar.dateComponents([.year, .month, .day], from: drag.targetDate)
+        components.hour = hour
+        components.minute = minute
+
+        if let newStart = calendar.date(from: components) {
+            let newEnd = newStart.addingTimeInterval(duration)
+            try? eventKitService.moveToDate(drag.item, newStart: newStart, newEnd: newEnd)
+        }
+
+        crossDayDrag = nil
+        editingItemId = nil
     }
 
     // MARK: - Helpers

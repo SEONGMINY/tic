@@ -20,8 +20,10 @@ struct EditableEventBlock: View {
     var onResizeItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onMoveItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onDuplicateItem: (_ itemId: String) -> Void
+    var onCrossDayDragStart: ((_ item: TicItem, _ horizontalTranslation: CGFloat) -> Void)?
 
     @State private var activeDrag: DragType = .none
+    @State private var crossDayDragTriggered = false
     @State private var dragOffset: CGFloat = 0
     @State private var tooltipTime: String?
     @State private var tooltipY: CGFloat = 0
@@ -170,6 +172,8 @@ struct EditableEventBlock: View {
     // MARK: - Drag Handling
 
     private func handleDragChanged(_ value: DragGesture.Value) {
+        if crossDayDragTriggered { return }
+
         if activeDrag == .none {
             let start = value.startLocation
             let distToTop = hypot(start.x - frameWidth, start.y)
@@ -181,6 +185,15 @@ struct EditableEventBlock: View {
             } else {
                 activeDrag = .move
             }
+        }
+
+        // Cross-day drag detection: horizontal > 60px in move mode
+        if activeDrag == .move && abs(value.translation.width) > 60 {
+            crossDayDragTriggered = true
+            onCrossDayDragStart?(item, value.translation.width)
+            activeDrag = .none
+            dragOffset = 0
+            return
         }
 
         dragOffset = value.translation.height
@@ -201,6 +214,7 @@ struct EditableEventBlock: View {
     }
 
     private func handleDragEnded(_ value: DragGesture.Value) {
+        crossDayDragTriggered = false
         let calendar = Calendar.current
 
         switch activeDrag {
