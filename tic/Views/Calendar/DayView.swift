@@ -20,6 +20,10 @@ struct DayView: View {
     @State private var showCreateSheet = false
     @State private var createDate: Date?
 
+    // Edit mode state
+    @State private var editingItemId: String?
+    @State private var showEditToolbar: Bool = true
+
     @Namespace private var dayAnimation
 
     private let weekdays = ["일", "월", "화", "수", "목", "금", "토"]
@@ -66,13 +70,29 @@ struct DayView: View {
                             eventFormViewModel.prepareForCreate(at: date)
                             showCreateSheet = true
                         },
-                        onEditItem: { item in onEditItem(item) },
                         onDeleteItem: { item in
                             itemToDelete = item
                             showDeleteAlert = true
                         },
                         onCompleteItem: { item in
                             try? eventKitService.complete(item)
+                        },
+                        editingItemId: $editingItemId,
+                        showEditToolbar: $showEditToolbar,
+                        onResizeItem: { itemId, newStart, newEnd in
+                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
+                                try? eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+                            }
+                        },
+                        onMoveItem: { itemId, newStart, newEnd in
+                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
+                                try? eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+                            }
+                        },
+                        onDuplicateItem: { itemId in
+                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
+                                try? eventKitService.duplicate(item)
+                            }
                         }
                     )
                 }
@@ -85,6 +105,7 @@ struct DayView: View {
                 .gesture(
                     DragGesture(minimumDistance: 60)
                         .onEnded { value in
+                            guard editingItemId == nil else { return }
                             let h = abs(value.translation.width)
                             let v = abs(value.translation.height)
                             guard h > v, h > 60 else { return }
