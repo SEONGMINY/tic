@@ -5,72 +5,77 @@ import ActivityKit
 struct TicLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TicActivityAttributes.self) { context in
-            LockScreenView(context: context)
-                .activityBackgroundTint(.black.opacity(0.8))
+            let event = currentEvent(from: context.state)
+            LockScreenView(event: event)
+                .activityBackgroundTint(.black.opacity(0.85))
+                .widgetURL(deepLinkURL(for: event.startDate))
         } dynamicIsland: { context in
             DynamicIsland {
-                // MARK: - Expanded
+                // MARK: Expanded
                 DynamicIslandExpandedRegion(.leading) {
-                    Text(context.state.title)
-                        .font(.system(size: 16, weight: .bold))
-                        .lineLimit(1)
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.orange)
+                    let ev = currentEvent(from: context.state)
+                    VStack(alignment: .leading, spacing: 0) {
                         Text("tic")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(Color.orange)
+                        Text(ev.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
                     }
                 }
+                DynamicIslandExpandedRegion(.trailing) {
+                    let ev = currentEvent(from: context.state)
+                    Text(timerInterval: ev.startDate...ev.endDate, countsDown: true)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.orange)
+                        .monospacedDigit()
+                        .multilineTextAlignment(.trailing)
+                }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 8) {
-                        JourneyProgressView(
-                            startDate: context.state.startDate,
-                            endDate: context.state.endDate,
-                            showTimes: true,
-                            height: 4
+                    let ev = currentEvent(from: context.state)
+                    VStack(spacing: 1) {
+                        SimpleProgressBar(
+                            progress: progressValue(start: ev.startDate, end: ev.endDate)
                         )
-
                         HStack {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color.orange)
-                                    .frame(width: 7, height: 7)
-                                Text("진행 중")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(Color.orange)
-                            }
+                            Text(formatTime(ev.startDate))
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                             Spacer()
-                            Text(remainingTimeCompact(start: context.state.startDate, end: context.state.endDate) + " 남음")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                            Text(formatTime(ev.endDate))
+                                .font(.system(size: 8, design: .rounded))
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
                     }
                 }
             } compactLeading: {
+                let ev = currentEvent(from: context.state)
                 HStack(spacing: 5) {
                     Circle()
                         .fill(Color.orange)
-                        .frame(width: 8, height: 8)
-                    Text(context.state.title)
+                        .frame(width: 10, height: 10)
+                    Text(ev.title)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
                 }
             } compactTrailing: {
-                Text(remainingTimeCompact(start: context.state.startDate, end: context.state.endDate))
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                let ev = currentEvent(from: context.state)
+                Text(timerInterval: ev.startDate...ev.endDate, countsDown: true)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.orange)
                     .monospacedDigit()
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .contentTransition(.numericText(countsDown: true))
             } minimal: {
+                let ev = currentEvent(from: context.state)
                 ZStack {
                     Circle()
                         .stroke(Color.orange.opacity(0.25), lineWidth: 2.5)
                     Circle()
-                        .trim(from: 0, to: progressValue(start: context.state.startDate, end: context.state.endDate))
+                        .trim(from: 0, to: progressValue(start: ev.startDate, end: ev.endDate))
                         .stroke(Color.orange, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }
@@ -80,140 +85,74 @@ struct TicLiveActivity: Widget {
     }
 }
 
-// MARK: - Journey Progress View
+// MARK: - Helper: extract current event from state
 
-struct JourneyProgressView: View {
-    let startDate: Date
-    let endDate: Date
-    let showTimes: Bool
-    let height: CGFloat
+private func currentEvent(from state: TicActivityAttributes.ContentState) -> ActivityEvent {
+    if let idx = state.currentIndex, idx < state.events.count {
+        return state.events[idx]
+    }
+    if let idx = state.nextIndex, idx < state.events.count {
+        return state.events[idx]
+    }
+    return state.events.first ?? ActivityEvent(title: "", startDate: Date(), endDate: Date(), colorHex: "#FF6B35")
+}
+
+// MARK: - Simple Progress Bar
+
+struct SimpleProgressBar: View {
+    let progress: CGFloat
 
     var body: some View {
-        let progress = progressValue(start: startDate, end: endDate)
-
-        VStack(spacing: 6) {
-            GeometryReader { geometry in
-                let totalWidth = geometry.size.width
-                let iconPosition = totalWidth * progress
-
-                ZStack(alignment: .leading) {
-                    // 시작 점
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: height + 4, height: height + 4)
-                        .position(x: 0, y: height / 2)
-
-                    // 진행된 부분 — 오렌지 실선
-                    if progress > 0 {
-                        Path { path in
-                            path.move(to: CGPoint(x: 0, y: height / 2))
-                            path.addLine(to: CGPoint(x: iconPosition, y: height / 2))
-                        }
-                        .stroke(Color.orange, style: StrokeStyle(lineWidth: height, lineCap: .round))
-                    }
-
-                    // 남은 부분 — 회색 점선
-                    if progress < 1 {
-                        Path { path in
-                            path.move(to: CGPoint(x: iconPosition, y: height / 2))
-                            path.addLine(to: CGPoint(x: totalWidth, y: height / 2))
-                        }
-                        .stroke(Color.gray.opacity(0.4), style: StrokeStyle(lineWidth: height, lineCap: .round, dash: [4, 4]))
-                    }
-
-                    // 종료 점
-                    Circle()
-                        .stroke(Color.gray.opacity(0.5), lineWidth: 1.5)
-                        .frame(width: height + 4, height: height + 4)
-                        .position(x: totalWidth, y: height / 2)
-
-                    // 시계 아이콘 — 현재 진행 위치
-                    Image(systemName: "clock.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.orange)
-                        .position(x: iconPosition, y: height / 2)
-                }
-            }
-            .frame(height: max(height + 4, 16))
-
-            if showTimes {
-                HStack {
-                    Text(formatTime(startDate))
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(formatTime(endDate))
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                }
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.15))
+                Capsule()
+                    .fill(Color.orange)
+                    .frame(width: max(geo.size.width * progress, 4))
             }
         }
+        .frame(height: 4)
     }
 }
 
 // MARK: - Lock Screen View
 
 private struct LockScreenView: View {
-    let context: ActivityViewContext<TicActivityAttributes>
+    let event: ActivityEvent
 
     var body: some View {
-        VStack(spacing: 14) {
-            // 상단: tic 로고(좌) + 일정 제목(우)
-            HStack {
-                Text("tic")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.orange)
+        VStack(spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("tic")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.orange)
+                    Text(event.title)
+                        .font(.system(size: 18, weight: .bold))
+                        .lineLimit(1)
+                }
                 Spacer()
-                Text(context.state.title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .lineLimit(1)
+                Text(timerInterval: event.startDate...event.endDate, countsDown: true)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.orange)
+                    .monospacedDigit()
+                    .multilineTextAlignment(.trailing)
             }
 
-            // 중앙: 시각적 여정 프로그레스
-            JourneyProgressView(
-                startDate: context.state.startDate,
-                endDate: context.state.endDate,
-                showTimes: true,
-                height: 4
+            SimpleProgressBar(
+                progress: progressValue(start: event.startDate, end: event.endDate)
             )
 
-            // 하단 상태
             HStack {
-                Text("시작됨 " + formatTime(context.state.startDate))
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
+                Text(formatTime(event.startDate))
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .monospacedDigit()
                 Spacer()
-                Text(remainingTimeCompact(start: context.state.startDate, end: context.state.endDate) + " 남음")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.orange)
+                Text(formatTime(event.endDate))
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
-            }
-
-            // 액션 버튼
-            HStack(spacing: 10) {
-                Button(intent: CompleteEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
-                    Text("완료")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color.orange.opacity(0.2))
-                        .foregroundStyle(Color.orange)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                Button(intent: SnoozeEventIntent(eventIdentifier: context.attributes.eventIdentifier)) {
-                    Text("10분 후 알림")
-                        .font(.system(size: 14, weight: .medium))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.1))
-                        .foregroundStyle(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
             }
         }
         .padding(16)
@@ -230,20 +169,14 @@ private func progressValue(start: Date, end: Date) -> CGFloat {
     return min(max(CGFloat(elapsed / total), 0), 1)
 }
 
-private func remainingTimeCompact(start: Date, end: Date) -> String {
-    let now = Date()
-    let target = now < start ? start : end
-    let remaining = Int(target.timeIntervalSince(now) / 60)
-    if remaining <= 0 { return "0분" }
-    if remaining < 60 { return "\(remaining)분" }
-    let h = remaining / 60
-    let m = remaining % 60
-    if m == 0 { return "\(h)시간" }
-    return "\(h):\(String(format: "%02d", m))"
-}
-
 private func formatTime(_ date: Date) -> String {
     let formatter = DateFormatter()
     formatter.dateFormat = "HH:mm"
     return formatter.string(from: date)
+}
+
+private func deepLinkURL(for date: Date) -> URL {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    return URL(string: "tic://day?date=\(formatter.string(from: date))")!
 }

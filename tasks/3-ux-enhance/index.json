@@ -1,0 +1,41 @@
+{
+  "project": "tic",
+  "task": "ux-enhance",
+  "prompt": "plan-and-build skill 사용해서 이 서비스의 mvp를 전부 구현하자. 일간 캘린더 사용성 개선: 주간 스트립 slide 애니메이션, phantom block 일정 생성, 편집 모드 (리사이즈/이동/날짜간 이동/toolbar), EventFormView 토글 UI, MonthView 이번달 버튼, YearView 올해 텍스트, Live Activity 전면 개편",
+  "totalPhases": 6,
+  "created_at": "2026-04-06T19:37:00+0900",
+  "phases": [
+    {
+      "phase": 0,
+      "name": "data-service-layer",
+      "status": "completed",
+      "started_at": "2026-04-06T19:43:05+0900",
+      "completed_at": "2026-04-06T20:10:00+0900"
+    },
+    {
+      "phase": 1,
+      "name": "simple-view-updates",
+      "status": "pending"
+    },
+    {
+      "phase": 2,
+      "name": "dayview-timeline-core",
+      "status": "pending"
+    },
+    {
+      "phase": 3,
+      "name": "edit-mode",
+      "status": "pending"
+    },
+    {
+      "phase": 4,
+      "name": "cross-day-drag",
+      "status": "pending"
+    },
+    {
+      "phase": 5,
+      "name": "live-activity-redesign",
+      "status": "pending"
+    }
+  ]
+}

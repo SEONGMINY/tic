@@ -10,6 +10,7 @@ class EventFormViewModel {
     var isCalendarType: Bool = true
     var startDate: Date?
     var endDate: Date?
+    var isAllDay: Bool = false
     var recurrence: RecurrenceOption = .none
     var alertTiming: AlertTiming = .thirtyMin
 
@@ -34,6 +35,7 @@ class EventFormViewModel {
         notes = ""
         selectedCalendar = nil
         isCalendarType = true
+        isAllDay = false
         startDate = nil
         endDate = nil
         recurrence = .none
@@ -52,6 +54,7 @@ class EventFormViewModel {
         title = item.title
         notes = item.notes ?? ""
         isCalendarType = !item.isReminder
+        isAllDay = item.isAllDay
         startDate = item.startDate
         endDate = item.endDate
         editingItem = item
@@ -102,6 +105,7 @@ class EventFormViewModel {
                 notes: notes.isEmpty ? nil : notes,
                 start: startDate,
                 end: endDate,
+                isAllDay: isCalendarType && isAllDay,
                 recurrence: recurrence,
                 alert: alertTiming
             )
@@ -119,6 +123,7 @@ class EventFormViewModel {
                     start: start,
                     end: end,
                     calendar: calendar,
+                    isAllDay: isAllDay,
                     recurrence: recurrence,
                     alert: alertTiming
                 )

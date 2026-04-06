@@ -63,7 +63,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             // 알림 탭 → Live Activity 시작
             let items = await eventKitService.fetchAllItems(for: Date())
             if let item = items.first(where: { $0.id == identifier }) {
-                try? liveActivityService.start(for: item)
+                try? liveActivityService.start(events: [item])
             }
         }
     }

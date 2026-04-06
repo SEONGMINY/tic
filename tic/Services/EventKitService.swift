@@ -102,32 +102,53 @@ class EventKitService {
         let reminderCalendars: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
             store.calendars(for: .reminder).filter { ids.contains($0.calendarIdentifier) }
         }
-        let predicate: NSPredicate
-        if let start, let end {
-            predicate = store.predicateForIncompleteReminders(
-                withDueDateStarting: start,
-                ending: end,
-                calendars: reminderCalendars
-            )
-        } else {
-            predicate = store.predicateForReminders(in: reminderCalendars)
-        }
 
-        let reminders: [EKReminder] = await withCheckedContinuation { continuation in
+        // 미완료 리마인더를 전부 가져와서 날짜로 필터링 (predicate 날짜 필터가 불안정하므로)
+        let predicate = store.predicateForIncompleteReminders(
+            withDueDateStarting: nil,
+            ending: nil,
+            calendars: reminderCalendars
+        )
+
+        let allReminders: [EKReminder] = await withCheckedContinuation { continuation in
             store.fetchReminders(matching: predicate) { result in
                 continuation.resume(returning: result ?? [])
             }
         }
 
-        return reminders.map { reminder in
-            let dueDate = reminder.dueDateComponents?.date
-            let hasTime = reminder.dueDateComponents?.hour != nil
+        let calendar = Calendar.current
+
+        let filtered: [EKReminder]
+        if let start, let end {
+            filtered = allReminders.filter { reminder in
+                guard let comps = reminder.dueDateComponents,
+                      let dueDate = calendar.date(from: comps) else {
+                    // 날짜 없는 리마인더도 포함 (체크리스트용)
+                    return true
+                }
+                return dueDate >= start && dueDate <= end
+            }
+        } else {
+            filtered = allReminders
+        }
+
+        return filtered.map { reminder in
+            let comps = reminder.dueDateComponents
+            let hasTime = comps?.hour != nil
+            let dueDate: Date? = {
+                guard let comps else { return nil }
+                return calendar.date(from: comps)
+            }()
+            let endDate: Date? = {
+                guard let d = dueDate, hasTime else { return dueDate }
+                return d.addingTimeInterval(1800)
+            }()
             return TicItem(
                 id: reminder.calendarItemIdentifier,
                 title: reminder.title ?? "",
                 notes: reminder.notes,
                 startDate: dueDate,
-                endDate: dueDate,
+                endDate: endDate,
                 isAllDay: false,
                 isCompleted: reminder.isCompleted,
                 isReminder: true,
@@ -166,7 +187,7 @@ class EventKitService {
     // 메모리 캐시: 월별 이벤트 수
     private var monthCountsCache: [Date: [Int: Int]] = [:]
 
-    // 한 달 전체 이벤트 수를 한 번에 계산 (캐시 적용)
+    // 한 달 전체 이벤트+리마인더 수를 한 번에 계산 (캐시 적용)
     func eventCountsForMonth(_ monthStart: Date) -> [Int: Int] {
         let key = monthStart.startOfMonth
         if let cached = monthCountsCache[key] {
@@ -176,13 +197,15 @@ class EventKitService {
         let calendar = Calendar.current
         let monthEnd = calendar.date(byAdding: .month, value: 1, to: key)!
 
-        let cals: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
+        var counts: [Int: Int] = [:]
+
+        // 캘린더 이벤트
+        let eventCals: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
             store.calendars(for: .event).filter { ids.contains($0.calendarIdentifier) }
         }
-        let predicate = store.predicateForEvents(withStart: key, end: monthEnd, calendars: cals)
+        let predicate = store.predicateForEvents(withStart: key, end: monthEnd, calendars: eventCals)
         let events = store.events(matching: predicate)
 
-        var counts: [Int: Int] = [:]
         for event in events {
             let eventStart = max(event.startDate, key)
             let eventEnd = min(event.endDate, monthEnd)
@@ -193,6 +216,39 @@ class EventKitService {
                 current = calendar.date(byAdding: .day, value: 1, to: current)!
             }
         }
+
+        // 시간 있는 리마인더
+        let reminderCals: [EKCalendar]? = enabledCalendarIdentifiers.map { ids in
+            store.calendars(for: .reminder).filter { ids.contains($0.calendarIdentifier) }
+        }
+        let reminderPredicate = store.predicateForIncompleteReminders(
+            withDueDateStarting: key,
+            ending: monthEnd,
+            calendars: reminderCals
+        )
+
+        // 동기적으로 리마인더 fetch (세마포어 사용)
+        let semaphore = DispatchSemaphore(value: 0)
+        var reminders: [EKReminder] = []
+        store.fetchReminders(matching: reminderPredicate) { result in
+            reminders = result ?? []
+            semaphore.signal()
+        }
+        semaphore.wait()
+
+        for reminder in reminders {
+            if let dueComps = reminder.dueDateComponents,
+               let dueDate = calendar.date(from: dueComps),
+               dueComps.hour != nil {
+                let day = calendar.component(.day, from: dueDate)
+                let month = calendar.component(.month, from: dueDate)
+                let expectedMonth = calendar.component(.month, from: key)
+                if month == expectedMonth {
+                    counts[day, default: 0] += 1
+                }
+            }
+        }
+
         monthCountsCache[key] = counts
         return counts
     }
@@ -210,6 +266,7 @@ class EventKitService {
         start: Date,
         end: Date,
         calendar: EKCalendar,
+        isAllDay: Bool = false,
         recurrence: RecurrenceOption,
         alert: AlertTiming
     ) throws -> String {
@@ -219,6 +276,7 @@ class EventKitService {
         event.startDate = start
         event.endDate = end
         event.calendar = calendar
+        event.isAllDay = isAllDay
         if let rule = recurrence.toRule() {
             event.recurrenceRules = [rule]
         }
@@ -264,6 +322,7 @@ class EventKitService {
         notes: String?,
         start: Date?,
         end: Date?,
+        isAllDay: Bool = false,
         recurrence: RecurrenceOption,
         alert: AlertTiming
     ) throws {
@@ -272,6 +331,7 @@ class EventKitService {
             event.notes = notes
             if let start { event.startDate = start }
             if let end { event.endDate = end }
+            event.isAllDay = isAllDay
             event.recurrenceRules = nil
             if let rule = recurrence.toRule() {
                 event.recurrenceRules = [rule]
@@ -318,6 +378,64 @@ class EventKitService {
         guard let reminder = item.ekReminder else { return }
         reminder.isCompleted = true
         try store.save(reminder, commit: true)
+        lastChangeDate = Date()
+        updateWidgetCache()
+    }
+
+    /// 동일 시간에 일정 복제. 반복 규칙은 제외.
+    @discardableResult
+    func duplicate(_ item: TicItem) throws -> String {
+        if let event = item.ekEvent {
+            let newEvent = EKEvent(eventStore: store)
+            newEvent.title = event.title
+            newEvent.notes = event.notes
+            newEvent.calendar = event.calendar
+            newEvent.startDate = event.startDate
+            newEvent.endDate = event.endDate
+            newEvent.isAllDay = event.isAllDay
+            // 알림 복사, 반복 규칙은 제외
+            event.alarms?.forEach { alarm in
+                newEvent.addAlarm(EKAlarm(relativeOffset: alarm.relativeOffset))
+            }
+            try store.save(newEvent, span: .thisEvent)
+            lastChangeDate = Date()
+            updateWidgetCache()
+            return newEvent.eventIdentifier
+        } else if let reminder = item.ekReminder {
+            let newReminder = EKReminder(eventStore: store)
+            newReminder.title = reminder.title
+            newReminder.notes = reminder.notes
+            newReminder.calendar = reminder.calendar
+            newReminder.dueDateComponents = reminder.dueDateComponents
+            // 알림 복사, 반복 규칙은 제외
+            reminder.alarms?.forEach { alarm in
+                if let absoluteDate = alarm.absoluteDate {
+                    newReminder.addAlarm(EKAlarm(absoluteDate: absoluteDate))
+                } else {
+                    newReminder.addAlarm(EKAlarm(relativeOffset: alarm.relativeOffset))
+                }
+            }
+            try store.save(newReminder, commit: true)
+            lastChangeDate = Date()
+            updateWidgetCache()
+            return newReminder.calendarItemIdentifier
+        }
+        throw NSError(domain: "EventKitService", code: -1, userInfo: [NSLocalizedDescriptionKey: "No event or reminder to duplicate"])
+    }
+
+    /// 일정의 시작/종료 시간을 변경 (날짜 간 이동 또는 같은 날 시간 변경에 사용)
+    func moveToDate(_ item: TicItem, newStart: Date, newEnd: Date) throws {
+        if let event = item.ekEvent {
+            event.startDate = newStart
+            event.endDate = newEnd
+            try store.save(event, span: .thisEvent)
+        } else if let reminder = item.ekReminder {
+            reminder.dueDateComponents = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: newStart
+            )
+            try store.save(reminder, commit: true)
+        }
         lastChangeDate = Date()
         updateWidgetCache()
     }

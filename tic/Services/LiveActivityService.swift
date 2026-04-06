@@ -4,21 +4,50 @@ import SwiftUI
 @Observable
 class LiveActivityService {
     private var currentActivity: Activity<TicActivityAttributes>?
+    private var lastEndTime: Date?
 
     var isActivityActive: Bool { currentActivity != nil }
 
-    func start(for item: TicItem) throws {
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+    // 종료 후 30초 내 재시작 방지
+    var canStart: Bool {
+        guard let lastEnd = lastEndTime else { return true }
+        return Date().timeIntervalSince(lastEnd) > 30
+    }
 
-        let attributes = TicActivityAttributes(eventIdentifier: item.id)
+    func start(events: [TicItem]) throws {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        guard canStart else { return }
+
+        let now = Date()
+        let activityEvents = events.prefix(10).map { item in
+            ActivityEvent(
+                title: item.title,
+                startDate: item.startDate ?? now,
+                endDate: item.endDate ?? now,
+                colorHex: item.calendarColor.hexString
+            )
+        }
+
+        // currentIndex/nextIndex 계산
+        var currentIndex: Int?
+        var nextIndex: Int?
+        for (i, item) in events.prefix(10).enumerated() {
+            guard let start = item.startDate, let end = item.endDate else { continue }
+            if start <= now && end > now && currentIndex == nil {
+                currentIndex = i
+            } else if start > now && nextIndex == nil {
+                nextIndex = i
+            }
+        }
+
+        let attributes = TicActivityAttributes()
         let state = TicActivityAttributes.ContentState(
-            title: item.title,
-            startDate: item.startDate ?? Date(),
-            endDate: item.endDate ?? Date(),
-            isReminder: item.isReminder,
-            calendarColorHex: item.calendarColor.hexString
+            events: activityEvents,
+            currentIndex: currentIndex,
+            nextIndex: nextIndex
         )
-        let content = ActivityContent(state: state, staleDate: item.endDate)
+        let staleDate = events.compactMap(\.endDate).max()
+        let content = ActivityContent(state: state, staleDate: staleDate)
         let activity = try Activity.request(
             attributes: attributes,
             content: content,
@@ -27,30 +56,51 @@ class LiveActivityService {
         currentActivity = activity
     }
 
-    func update(for item: TicItem) {
+    func update(events: [TicItem]) {
         guard let activity = currentActivity else { return }
+
+        let now = Date()
+        let activityEvents = events.prefix(10).map { item in
+            ActivityEvent(
+                title: item.title,
+                startDate: item.startDate ?? now,
+                endDate: item.endDate ?? now,
+                colorHex: item.calendarColor.hexString
+            )
+        }
+
+        var currentIndex: Int?
+        var nextIndex: Int?
+        for (i, item) in events.prefix(10).enumerated() {
+            guard let start = item.startDate, let end = item.endDate else { continue }
+            if start <= now && end > now && currentIndex == nil {
+                currentIndex = i
+            } else if start > now && nextIndex == nil {
+                nextIndex = i
+            }
+        }
+
         let state = TicActivityAttributes.ContentState(
-            title: item.title,
-            startDate: item.startDate ?? Date(),
-            endDate: item.endDate ?? Date(),
-            isReminder: item.isReminder,
-            calendarColorHex: item.calendarColor.hexString
+            events: activityEvents,
+            currentIndex: currentIndex,
+            nextIndex: nextIndex
         )
-        let content = ActivityContent(state: state, staleDate: item.endDate)
+        let staleDate = events.compactMap(\.endDate).max()
+        let content = ActivityContent(state: state, staleDate: staleDate)
         Task {
             await activity.update(content)
         }
     }
 
     func end(for identifier: String) {
-        guard let activity = currentActivity,
-              activity.attributes.eventIdentifier == identifier else { return }
+        guard let activity = currentActivity else { return }
         let state = activity.content.state
         let content = ActivityContent(state: state, staleDate: nil)
         Task {
             await activity.end(content, dismissalPolicy: .immediate)
         }
         currentActivity = nil
+        lastEndTime = Date()
     }
 
     func endAll() {
@@ -60,18 +110,7 @@ class LiveActivityService {
             }
         }
         currentActivity = nil
-    }
-
-    func transition(to next: TicItem) throws {
-        if let current = currentActivity {
-            let state = current.content.state
-            let content = ActivityContent(state: state, staleDate: nil)
-            Task {
-                await current.end(content, dismissalPolicy: .immediate)
-            }
-            currentActivity = nil
-        }
-        try start(for: next)
+        lastEndTime = Date()
     }
 }
 

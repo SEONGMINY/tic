@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import ActivityKit
 
 struct ContentView: View {
     @Query private var calendarSelections: [CalendarSelection]
@@ -192,17 +193,28 @@ struct ContentView: View {
     // MARK: - Live Activity 자동 시작
 
     private func checkLiveActivity() async {
+        // Live Activity 지원 확인
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+
         let now = Date()
         let items = await eventKitService.fetchAllItems(for: now)
-        let upcoming = items.filter { item in
+
+        // 시간 있는 일정만 필터 (하루종일 제외)
+        let timeItems = items.filter { item in
             guard let start = item.startDate, let end = item.endDate else { return false }
             let minutesBefore = start.timeIntervalSince(now) / 60
             return minutesBefore <= 30 && end > now && !item.isAllDay
-        }.first
+        }
 
-        if let next = upcoming {
+        if !timeItems.isEmpty {
             if !liveActivityService.isActivityActive {
-                try? liveActivityService.start(for: next)
+                do {
+                    try liveActivityService.start(events: timeItems)
+                } catch {
+                    // Live Activity start failed
+                }
+            } else {
+                liveActivityService.update(events: timeItems)
             }
         } else if liveActivityService.isActivityActive {
             liveActivityService.endAll()
@@ -226,5 +238,8 @@ struct ContentView: View {
                 eventKitService.enabledCalendarIdentifiers = allIds.subtracting(disabledSet)
             }
         }
+        // 캐시 무효화하여 즉시 반영
+        eventKitService.invalidateMonthCache()
+        eventKitService.lastChangeDate = Date()
     }
 }
