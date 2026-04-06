@@ -4,14 +4,21 @@ struct DayView: View {
     var viewModel: CalendarViewModel
     var dayViewModel: DayViewModel
     var eventKitService: EventKitService
+    var eventFormViewModel: EventFormViewModel
+    var notificationService: NotificationService
     var onEditItem: (TicItem) -> Void
-    var onCreateAtDate: (Date) -> Void
 
     @State private var showActionSheet = false
     @State private var showDeleteAlert = false
     @State private var itemToDelete: TicItem?
     @State private var slideDirection: Edge = .trailing
     @State private var contentId = UUID()
+    @State private var weekStripId = UUID()
+
+    // Phantom block state
+    @State private var phantomBlock: PhantomBlockInfo?
+    @State private var showCreateSheet = false
+    @State private var createDate: Date?
 
     @Namespace private var dayAnimation
 
@@ -27,6 +34,11 @@ struct DayView: View {
         VStack(spacing: 0) {
             // 주간 스트립 (탭 + 스와이프)
             weekStrip
+                .id(weekStripId)
+                .transition(.asymmetric(
+                    insertion: .move(edge: slideDirection),
+                    removal: .move(edge: slideDirection == .trailing ? .leading : .trailing)
+                ))
                 .padding(.top, 8)
                 .padding(.bottom, 6)
 
@@ -41,10 +53,19 @@ struct DayView: View {
 
                     TimelineView(
                         timedItems: dayViewModel.timedItems,
-                        layout: dayViewModel.computeLayout(containerWidth: UIScreen.main.bounds.width - 52),
+                        layout: dayViewModel.computeLayout(containerWidth: UIScreen.main.bounds.width - 60),
                         selectedDate: viewModel.selectedDate,
+                        phantomBlock: phantomBlock,
                         onEventTap: { item in onEditItem(item) },
-                        onTimeSlotLongPress: { date in onCreateAtDate(date) },
+                        onTimeSlotLongPress: { date in
+                            let calendar = Calendar.current
+                            let hour = calendar.component(.hour, from: date)
+                            let minute = calendar.component(.minute, from: date)
+                            phantomBlock = PhantomBlockInfo(hour: hour, minute: minute)
+                            createDate = date
+                            eventFormViewModel.prepareForCreate(at: date)
+                            showCreateSheet = true
+                        },
                         onEditItem: { item in onEditItem(item) },
                         onDeleteItem: { item in
                             itemToDelete = item
@@ -71,12 +92,14 @@ struct DayView: View {
                                 slideDirection = .leading
                                 withAnimation(.easeInOut(duration: 0.25)) {
                                     contentId = UUID()
+                                    weekStripId = UUID()
                                     viewModel.selectedDate = viewModel.selectedDate.adding(days: -1)
                                 }
                             } else {
                                 slideDirection = .trailing
                                 withAnimation(.easeInOut(duration: 0.25)) {
                                     contentId = UUID()
+                                    weekStripId = UUID()
                                     viewModel.selectedDate = viewModel.selectedDate.adding(days: 1)
                                 }
                             }
@@ -120,6 +143,18 @@ struct DayView: View {
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showCreateSheet, onDismiss: {
+            phantomBlock = nil
+            createDate = nil
+        }) {
+            EventFormView(
+                viewModel: eventFormViewModel,
+                eventKitService: eventKitService,
+                notificationService: notificationService,
+                onDismiss: { showCreateSheet = false }
+            )
+            .presentationDetents([.medium, .large])
         }
         .alert("이 일정을 삭제하시겠습니까?", isPresented: $showDeleteAlert) {
             Button("삭제", role: .destructive) {
@@ -177,6 +212,7 @@ struct DayView: View {
                     slideDirection = direction
                     withAnimation(.easeInOut(duration: 0.25)) {
                         contentId = UUID()
+                        weekStripId = UUID()
                         viewModel.selectedDate = date
                     }
                 } label: {
@@ -221,12 +257,14 @@ struct DayView: View {
                         slideDirection = .leading
                         withAnimation(.easeInOut(duration: 0.25)) {
                             contentId = UUID()
+                            weekStripId = UUID()
                             viewModel.selectedDate = viewModel.selectedDate.adding(days: -7)
                         }
                     } else if value.translation.width < -30 {
                         slideDirection = .trailing
                         withAnimation(.easeInOut(duration: 0.25)) {
                             contentId = UUID()
+                            weekStripId = UUID()
                             viewModel.selectedDate = viewModel.selectedDate.adding(days: 7)
                         }
                     }

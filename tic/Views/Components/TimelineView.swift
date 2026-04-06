@@ -1,9 +1,15 @@
 import SwiftUI
 
+struct PhantomBlockInfo {
+    let hour: Int
+    let minute: Int
+}
+
 struct TimelineView: View {
     var timedItems: [TicItem]
     var layout: [String: LayoutAttributes]
     var selectedDate: Date
+    var phantomBlock: PhantomBlockInfo?
     var onEventTap: (TicItem) -> Void
     var onTimeSlotLongPress: (Date) -> Void
     var onEditItem: (TicItem) -> Void
@@ -11,30 +17,16 @@ struct TimelineView: View {
     var onCompleteItem: (TicItem) -> Void
 
     let hourHeight: CGFloat = 60
-    private let timeColumnWidth: CGFloat = 44
+    private let timeColumnWidth: CGFloat = 52
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 ZStack(alignment: .topLeading) {
-                    // 배경: 시간 라인
+                    // 1. 시간 라인 + 시간 라벨 long press
                     timeLines
 
-                    // 이벤트 블록
-                    GeometryReader { geometry in
-                        let eventAreaWidth = geometry.size.width - timeColumnWidth
-                        ForEach(timedItems, id: \.id) { item in
-                            eventBlock(for: item, containerWidth: eventAreaWidth)
-                        }
-                    }
-
-                    // 현재 시간 표시 (오늘만)
-                    if selectedDate.isToday {
-                        currentTimeLine
-                            .id("nowLine")
-                    }
-
-                    // 빈 시간대 꾹 누르기
+                    // 2. 빈 시간대 꾹 누르기 (이벤트 블록 아래)
                     GeometryReader { geometry in
                         let eventAreaWidth = geometry.size.width - timeColumnWidth
                         ForEach(0..<24, id: \.self) { hour in
@@ -49,6 +41,36 @@ struct TimelineView: View {
                                 }
                                 .offset(x: timeColumnWidth, y: CGFloat(hour) * hourHeight)
                         }
+                    }
+
+                    // 3. 이벤트 블록
+                    GeometryReader { geometry in
+                        let eventAreaWidth = geometry.size.width - timeColumnWidth
+                        ForEach(timedItems, id: \.id) { item in
+                            eventBlock(for: item, containerWidth: eventAreaWidth)
+                        }
+                    }
+                    .zIndex(1)
+
+                    // 4. Phantom block (있을 때만)
+                    if let phantom = phantomBlock {
+                        GeometryReader { geometry in
+                            let yPos = (CGFloat(phantom.hour) + CGFloat(phantom.minute) / 60.0) * hourHeight
+                            let eventAreaWidth = geometry.size.width - timeColumnWidth
+
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.orange.opacity(0.4))
+                                .frame(width: eventAreaWidth - 2, height: hourHeight - 1)
+                                .offset(x: timeColumnWidth, y: yPos)
+                        }
+                        .zIndex(0.5)
+                    }
+
+                    // 5. 현재 시간 표시 (오늘만)
+                    if selectedDate.isToday {
+                        currentTimeLine
+                            .zIndex(2)
+                            .id("nowLine")
                     }
                 }
                 .frame(height: 24 * hourHeight + 20)
@@ -82,6 +104,13 @@ struct TimelineView: View {
                         .foregroundStyle(.tertiary)
                         .frame(width: timeColumnWidth, alignment: .trailing)
                         .padding(.trailing, 6)
+                        .contentShape(Rectangle())
+                        .onLongPressGesture(minimumDuration: 0.5) {
+                            let calendar = Calendar.current
+                            if let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: selectedDate) {
+                                onTimeSlotLongPress(date)
+                            }
+                        }
 
                     Rectangle()
                         .fill(Color(.separator).opacity(0.5))
@@ -144,7 +173,6 @@ struct TimelineView: View {
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
-        .buttonStyle(.plain)
         .buttonStyle(.plain)
         .contextMenu {
             Button("수정") { onEditItem(item) }

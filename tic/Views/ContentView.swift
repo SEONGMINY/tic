@@ -177,12 +177,10 @@ struct ContentView: View {
                 viewModel: viewModel,
                 dayViewModel: dayViewModel,
                 eventKitService: eventKitService,
+                eventFormViewModel: eventFormViewModel,
+                notificationService: notificationService,
                 onEditItem: { item in
                     eventFormViewModel.prepareForEdit(item, service: eventKitService)
-                    showEventForm = true
-                },
-                onCreateAtDate: { date in
-                    eventFormViewModel.prepareForCreate(at: date)
                     showEventForm = true
                 }
             )

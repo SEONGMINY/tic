@@ -261,6 +261,6 @@ struct EventFormView: View {
                 Text("Apple Calendar/Reminders에서도 삭제됩니다.")
             }
         }
-        .presentationDetents([.large])
+        .presentationDetents([.medium, .large])
     }
 }
