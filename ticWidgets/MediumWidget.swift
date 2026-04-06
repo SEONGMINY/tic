@@ -162,14 +162,14 @@ struct MiniCalendarView: View {
         VStack(spacing: 2) {
             // Month title
             Text(monthTitle)
-                .font(.system(size: 8, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .frame(maxWidth: .infinity, alignment: .trailing)
 
             // Weekday headers
             LazyVGrid(columns: columns, spacing: 1) {
                 ForEach(weekdaySymbols, id: \.self) { symbol in
                     Text(symbol)
-                        .font(.system(size: 6))
+                        .font(.system(size: 8))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                 }
@@ -184,9 +184,9 @@ struct MiniCalendarView: View {
                     } else {
                         VStack(spacing: 0) {
                             Text("\(day.day)")
-                                .font(.system(size: 7, weight: day.hasEvent ? .bold : .regular))
+                                .font(.system(size: 9, weight: day.hasEvent ? .bold : .regular))
                                 .foregroundStyle(day.isToday ? .white : .primary)
-                                .frame(width: 14, height: 14)
+                                .frame(width: 16, height: 16)
                                 .background {
                                     if day.isToday {
                                         Circle().fill(Color.orange)

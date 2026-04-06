@@ -18,8 +18,8 @@ struct SmallTicWidget: Widget {
 struct SmallWidgetView: View {
     var entry: TicWidgetEntry
 
-    private var nextEvent: WidgetEventItem? {
-        entry.events.first { !$0.isCompleted }
+    private var upcomingEvents: [WidgetEventItem] {
+        Array(entry.events.filter { !$0.isCompleted }.prefix(3))
     }
 
     private var dateString: String {
@@ -28,62 +28,70 @@ struct SmallWidgetView: View {
         return formatter.string(from: entry.date)
     }
 
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
     var body: some View {
-        Group {
-            if let event = nextEvent {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("tic")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.orange)
+        VStack(alignment: .leading, spacing: 0) {
+            // 상단: 요일 + 날짜 (컴팩트)
+            HStack(alignment: .bottom, spacing: 6) {
+                Text(verbatim: "\(Calendar.current.component(.day, from: entry.date))")
+                    .font(.system(size: 26, weight: .bold))
 
-                    Spacer()
+                Text(weekdayText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 4)
 
-                    Text(event.title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .lineLimit(2)
+                Spacer()
+            }
 
-                    HStack {
-                        if let start = event.startDate, !event.isAllDay {
-                            let formatter = {
-                                let f = DateFormatter()
-                                f.dateFormat = "HH:mm"
-                                return f
-                            }()
-                            Text(formatter.string(from: start))
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        } else if event.isAllDay {
-                            Text("종일")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
+            Spacer().frame(height: 8)
+
+            // 일정 리스트
+            if upcomingEvents.isEmpty {
+                Spacer()
+                Text("일정 없음")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(upcomingEvents, id: \.id) { event in
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(Color(hex: event.calendarColorHex))
+                                .frame(width: 6, height: 6)
+
+                            Text(event.title)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
                         }
 
-                        Spacer()
-
-                        if event.isReminder {
-                            Button(intent: CompleteEventIntent(eventIdentifier: event.id)) {
-                                Image(systemName: "checkmark.circle")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(Color.orange)
+                        if let start = event.startDate, !event.isAllDay {
+                            HStack(spacing: 0) {
+                                Spacer().frame(width: 11)
+                                Text(Self.timeFormatter.string(from: start))
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.plain)
+                            .padding(.top, -4)
                         }
                     }
                 }
-            } else {
-                VStack(spacing: 8) {
-                    Text("tic")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.orange)
-                    Spacer()
-                    Text("예정된 일정이\n없습니다")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Spacer()
-                }
+                Spacer(minLength: 0)
             }
         }
         .widgetURL(URL(string: "tic://day?date=\(dateString)")!)
+    }
+
+    private var weekdayText: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "EEEE"
+        return formatter.string(from: entry.date)
     }
 }

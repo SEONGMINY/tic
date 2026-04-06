@@ -27,7 +27,8 @@ struct DayView: View {
         VStack(spacing: 0) {
             // 주간 스트립 (탭 + 스와이프)
             weekStrip
-                .padding(.vertical, 2)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
 
             Divider()
 
@@ -179,22 +180,30 @@ struct DayView: View {
                         viewModel.selectedDate = date
                     }
                 } label: {
-                    VStack(spacing: 3) {
+                    VStack(spacing: 4) {
                         Text(weekdays[Calendar.current.component(.weekday, from: date) - 1])
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                             .foregroundStyle(isToday ? .orange : .secondary)
 
                         Text(verbatim: "\(date.day)")
-                            .font(.system(size: 16, weight: isSelected ? .bold : .regular))
-                            .foregroundStyle(isSelected ? .white : (isToday ? .orange : .primary))
-                            .frame(width: 30, height: 30)
+                            .font(.system(size: 17, weight: isSelected ? .bold : .regular))
+                            .foregroundStyle(
+                                isSelected && isToday ? .white :
+                                isSelected ? Color(.systemBackground) :
+                                isToday ? .orange : .primary
+                            )
+                            .frame(width: 34, height: 34)
                             .background {
-                                if isSelected {
+                                if isSelected && isToday {
                                     Circle().fill(.orange)
+                                        .matchedGeometryEffect(id: "dayIndicator", in: dayAnimation)
+                                } else if isSelected {
+                                    Circle().fill(Color(.label))
                                         .matchedGeometryEffect(id: "dayIndicator", in: dayAnimation)
                                 }
                             }
                     }
+                    .padding(.vertical, 4)
                 }
                 .frame(maxWidth: .infinity)
             }

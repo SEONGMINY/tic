@@ -4,19 +4,18 @@ struct YearView: View {
     var viewModel: CalendarViewModel
     var eventKitService: EventKitService
 
-    @State private var anchorYear: Int = Calendar.current.component(.year, from: .now)
     @State private var initialized = false
+    @State private var scrollToTodayTrigger = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
-    // 고정 범위. 동적 확장 없음 — 스크롤 끊김 제거.
-    // Apple Calendar과 동일: 1년~9999년
+    private let years = Array(1...9999)
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 20) {
-                        ForEach(yearsRange, id: \.self) { year in
+                        ForEach(years, id: \.self) { year in
                             YearSection(year: year, onMonthTap: { monthNum in
                                 if let date = Calendar.current.date(from: DateComponents(year: year, month: monthNum, day: 1)) {
                                     withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
@@ -34,24 +33,22 @@ struct YearView: View {
                     .padding(.vertical, 8)
                 }
                 .onAppear {
-                    if !initialized {
-                        anchorYear = viewModel.displayedYear
-                        initialized = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            proxy.scrollTo(anchorYear, anchor: .top)
-                        }
+                    let target = viewModel.displayedYear
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        proxy.scrollTo(target, anchor: .top)
                     }
                 }
-                .onChange(of: scrollToToday) { _, _ in
+                .onChange(of: scrollToTodayTrigger) { _, _ in
+                    let currentYear = Calendar.current.component(.year, from: .now)
                     withAnimation(.easeOut(duration: 0.3)) {
-                        proxy.scrollTo(Calendar.current.component(.year, from: .now), anchor: .top)
+                        proxy.scrollTo(currentYear, anchor: .top)
                     }
                 }
             }
 
             // 오늘 버튼
             Button {
-                scrollToToday.toggle()
+                scrollToTodayTrigger.toggle()
             } label: {
                 Text("오늘")
                     .font(.system(size: 14, weight: .semibold))
@@ -65,15 +62,9 @@ struct YearView: View {
             .padding(.bottom, 16)
         }
     }
-
-    @State private var scrollToToday = false
-
-    private var yearsRange: [Int] {
-        Array(1...9999)
-    }
 }
 
-// 년도 섹션 — 별도 struct로 분리하여 불필요한 리렌더 방지
+// 년도 섹션
 private struct YearSection: View {
     let year: Int
     let onMonthTap: (Int) -> Void
@@ -103,7 +94,7 @@ private struct YearSection: View {
     }
 }
 
-// 극도로 경량화된 미니 월 — 단순 Text만 사용
+// 경량 미니 월 셀
 private struct LightweightMiniMonth: View {
     let year: Int
     let month: Int
@@ -121,13 +112,11 @@ private struct LightweightMiniMonth: View {
                 .foregroundStyle(isCurrentMonth ? .orange : .secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-            // 요일 헤더
             Text("일 월 화 수 목 금 토")
                 .font(.system(size: 5))
                 .foregroundStyle(.quaternary)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-            // 날짜
             Text(daysText)
                 .font(.system(size: 7, weight: .light, design: .monospaced))
                 .foregroundStyle(.primary)
@@ -136,7 +125,6 @@ private struct LightweightMiniMonth: View {
         }
     }
 
-    // 날짜를 단순 문자열로 생성 — 뷰 갯수 최소화
     private var daysText: String {
         guard let firstDay = Self.cal.date(from: DateComponents(year: year, month: month, day: 1)) else {
             return ""

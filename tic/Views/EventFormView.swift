@@ -64,37 +64,55 @@ struct EventFormView: View {
 
                 // 저장 위치
                 Section {
-                    Picker(selection: selectedCalendarId) {
-                        Text("선택").tag("")
-
-                        if !allCalendars.isEmpty {
-                            ForEach(allCalendars, id: \.calendarIdentifier) { cal in
-                                Label {
-                                    Text(cal.title).font(.system(size: 14))
-                                } icon: {
-                                    Image(systemName: "calendar")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(Color(cgColor: cal.cgColor))
-                                }
-                                .tag(cal.calendarIdentifier)
-                            }
-                        }
-
-                        if !allReminderLists.isEmpty {
-                            ForEach(allReminderLists, id: \.calendarIdentifier) { list in
-                                Label {
-                                    Text(list.title).font(.system(size: 14))
-                                } icon: {
-                                    Image(systemName: "checklist")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(Color(cgColor: list.cgColor))
-                                }
-                                .tag(list.calendarIdentifier)
-                            }
-                        }
-                    } label: {
+                    HStack {
                         Text("캘린더")
                             .font(.system(size: 14))
+                        Spacer()
+                        Menu {
+                            // 캘린더 섹션
+                            if !allCalendars.isEmpty {
+                                Section("캘린더") {
+                                    ForEach(allCalendars, id: \.calendarIdentifier) { cal in
+                                        Button {
+                                            selectedCalendarId.wrappedValue = cal.calendarIdentifier
+                                        } label: {
+                                            Label(cal.title, systemImage: "calendar")
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 미리 알림 섹션
+                            if !allReminderLists.isEmpty {
+                                Section("미리 알림") {
+                                    ForEach(allReminderLists, id: \.calendarIdentifier) { list in
+                                        Button {
+                                            selectedCalendarId.wrappedValue = list.calendarIdentifier
+                                        } label: {
+                                            Label(list.title, systemImage: "checklist")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                if let cal = viewModel.selectedCalendar {
+                                    Circle()
+                                        .fill(Color(cgColor: cal.cgColor))
+                                        .frame(width: 8, height: 8)
+                                    Text(cal.title)
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.primary)
+                                } else {
+                                    Text("선택")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
 

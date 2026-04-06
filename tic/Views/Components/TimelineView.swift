@@ -20,7 +20,7 @@ struct TimelineView: View {
                     // 배경: 시간 라인
                     timeLines
 
-                    // 전경: 이벤트 블록
+                    // 이벤트 블록
                     GeometryReader { geometry in
                         let eventAreaWidth = geometry.size.width - timeColumnWidth
                         ForEach(timedItems, id: \.id) { item in
@@ -112,10 +112,16 @@ struct TimelineView: View {
         return Button {
             onEventTap(item)
         } label: {
-            HStack {
+            HStack(spacing: 3) {
+                if item.isReminder {
+                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 10))
+                        .opacity(0.9)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
                         .font(.system(size: 11, weight: .medium))
+                        .strikethrough(item.isCompleted)
                         .lineLimit(height < 30 ? 1 : 2)
 
                     if height >= 40, let start = item.startDate {
@@ -134,17 +140,15 @@ struct TimelineView: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
             .frame(width: max(width - 2, 0), height: max(height - 1, 16), alignment: .topLeading)
-            .background(bgColor.opacity(0.85))
+            .background(bgColor.opacity(item.isCompleted ? 0.4 : 0.85))
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
+        .buttonStyle(.plain)
         .contextMenu {
             Button("수정") { onEditItem(item) }
             Button("삭제", role: .destructive) { onDeleteItem(item) }
-            if item.isReminder {
-                Button("완료") { onCompleteItem(item) }
-            }
         }
         .offset(x: xPos, y: yPos)
     }

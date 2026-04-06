@@ -4,7 +4,7 @@
 **단순 MVVM + Service Layer.** Clean Architecture, VIPER, TCA 사용하지 않음. MVP 속도 > 아키텍처 순수성.
 
 ## 상태 관리
-`@Observable` (Observation 프레임워크, iOS 17+). `@ObservableObject`/`@Published` 사용 안 함 — 보일러플레이트 적고, 성능 좋고, 세밀한 뷰 업데이트 가능.
+`@Observable` (Observation 프레임워크, iOS 17+). `@ObservableObject`/`@Published` 사용 안 함.
 
 ## 데이터 흐름
 ```
@@ -21,58 +21,56 @@ ViewModel → EventKitService → EventKit에 직접 쓰기
 자동 리프레시 사이클
 ```
 
-커스텀 동기화 없음. 중간 캐시 없음 (위젯 UserDefaults 제외). EventKit 노티피케이션이 반응성을 담당.
-
-## 프로젝트 구조 (~25개 파일)
+## 프로젝트 구조
 
 ```
 tic/
-├── ticApp.swift                     // @main, SwiftData ModelContainer, 딥링크 처리
+├── ticApp.swift                     // @main, SwiftData, 딥링크 처리
 │
 ├── Models/
 │   ├── TicItem.swift                // 통합 뷰 모델 (struct, 인메모리)
+│   ├── TicActivityAttributes.swift  // ActivityAttributes + ContentState (다중 이벤트)
 │   ├── SearchHistory.swift          // SwiftData
 │   ├── CalendarSelection.swift      // SwiftData
 │   └── NotificationMeta.swift       // SwiftData
 │
 ├── Services/
-│   ├── EventKitService.swift        // EventKit CRUD, EKEvent↔TicItem 변환, 변경 감지
-│   ├── NotificationService.swift    // UNUserNotificationCenter 스케줄링, 스누즈, 액션 처리
-│   └── LiveActivityService.swift    // ActivityKit 시작/업데이트/종료/전환
+│   ├── EventKitService.swift        // EventKit CRUD, 변경 감지, duplicate(), moveToDate()
+│   ├── NotificationService.swift    // UNUserNotificationCenter
+│   └── LiveActivityService.swift    // ActivityKit (다중 이벤트 타임라인)
 │
 ├── ViewModels/
-│   ├── CalendarViewModel.swift      // 월간/년간 뷰 데이터, scope 상태 (year/month/day)
-│   ├── DayViewModel.swift           // 일간 이벤트, 다음 행동 로직, 타임라인 레이아웃
-│   ├── EventFormViewModel.swift     // 생성/수정 폼 상태, 유효성 검사, 저장/삭제
-│   └── SearchViewModel.swift        // 검색어, 필터링, 기록 관리
+│   ├── CalendarViewModel.swift      // scope 상태 (year/month/day), 날짜 선택
+│   ├── DayViewModel.swift           // 일간 이벤트, 다음 행동, 타임라인 레이아웃
+│   ├── EventFormViewModel.swift     // 폼 상태, 유효성, 저장/삭제, isAllDay
+│   └── SearchViewModel.swift        // 검색어, 필터링, 기록
 │
 ├── Views/
-│   ├── ContentView.swift            // 루트: scope 전환 (year/month/day), pinch 제스처, 내비바
+│   ├── ContentView.swift            // 루트: scope 전환, pinch, 내비바, LA 시작 로직
 │   ├── Calendar/
-│   │   ├── YearView.swift           // 12개월 미니 그리드
-│   │   ├── MonthView.swift          // 캘린더 그리드 + 점 표시
-│   │   └── DayView.swift            // 다음 행동 + 타임라인 + 체크리스트 FAB
-│   ├── EventFormView.swift          // 추가/수정 bottom sheet
-│   ├── SearchView.swift             // 검색 화면
-│   ├── SettingsView.swift           // 캘린더 토글 bottom sheet
+│   │   ├── YearView.swift           // 12개월 그리드 + "올해" 버튼
+│   │   ├── MonthView.swift          // 캘린더 그리드 + "이번달" 버튼
+│   │   └── DayView.swift            // 주간 스트립 + 타임라인 + phantom block + 편집 모드 상태
+│   ├── EventFormView.swift          // Segmented Control + 하루종일 토글 + 둥근 스타일
+│   ├── SearchView.swift
+│   ├── SettingsView.swift
 │   └── Components/
-│       ├── TimelineView.swift       // 24시간 스크롤 가능 타임라인 + 이벤트 블록
-│       ├── NextActionCard.swift     // "다음 행동" 카드 컴포넌트
-│       └── ChecklistSheet.swift     // 시간 없는 리마인더 bottom sheet
+│       ├── TimelineView.swift       // 24시간 타임라인 + 이벤트 블록 (기본 상태)
+│       ├── EditableEventBlock.swift  // 편집 모드 핸들 + 리사이즈 + 이동 + toolbar (500줄 초과 시 분리)
+│       ├── NextActionCard.swift
+│       └── ChecklistSheet.swift
 │
 ├── Extensions/
-│   └── Date+Extensions.swift        // startOfDay, endOfDay, 캘린더 연산
+│   └── Date+Extensions.swift
 │
-├── ticWidgets/                      // Widget Extension 타겟
+├── ticWidgets/
 │   ├── TicWidgetBundle.swift
 │   ├── SmallWidget.swift
 │   ├── MediumWidget.swift
-│   ├── WidgetProvider.swift         // 공유 TimelineProvider
+│   ├── WidgetProvider.swift
 │   └── WidgetIntents.swift          // CompleteEventIntent, SnoozeEventIntent
 │
-└── ticLiveActivity/                 // 메인 타겟 내 (ActivityKit)
-    ├── TicActivityAttributes.swift  // ActivityAttributes 정의
-    └── TicLiveActivityView.swift    // 잠금화면 / Dynamic Island UI
+└── TicLiveActivityView.swift        // Lock Screen + Dynamic Island (progress line UI)
 ```
 
 ## 서비스 계약
@@ -88,21 +86,23 @@ tic/
     func fetchEvents(from: Date, to: Date) -> [TicItem]
     func fetchReminders(from: Date?, to: Date?) async -> [TicItem]
     func fetchAllItems(for date: Date) async -> [TicItem]
-    func hasEvents(on date: Date) -> Bool  // 월간/년간 뷰 점 표시용
+    func hasEvents(on date: Date) -> Bool
     
     // 쓰기
-    func createEvent(title:notes:start:end:calendar:recurrence:alert:) throws -> String
+    func createEvent(title:notes:start:end:calendar:isAllDay:recurrence:alert:) throws -> String
     func createReminder(title:notes:dueDate:list:alert:) throws -> String
     func update(_ item: TicItem, ...) throws
     func delete(_ item: TicItem) throws
     func complete(_ item: TicItem) throws
+    func duplicate(_ item: TicItem) throws -> String    // 같은 시간에 복제, 반복 규칙 제외
+    func moveToDate(_ item: TicItem, newStart: Date, newEnd: Date) throws  // 날짜 간 이동
     
     // 캘린더 목록
     func availableCalendars() -> [EKCalendar]
     func availableReminderLists() -> [EKCalendar]
     
     // 변경 감지
-    func startObservingChanges()  // EKEventStoreChanged 구독
+    func startObservingChanges()
 }
 ```
 
@@ -123,46 +123,74 @@ enum AlertTiming: Int, CaseIterable {
 ### LiveActivityService
 ```swift
 class LiveActivityService {
-    func start(for item: TicItem) throws
-    func update(for item: TicItem)
+    func start(events: [TicItem]) throws          // 오늘의 전체 일정으로 시작
+    func update(events: [TicItem])                // 상태 갱신 (currentIndex/nextIndex 재계산)
     func end(for identifier: String)
-    func transition(to next: TicItem) throws  // 현재 종료 → 다음 시작
+    func endAll()
+    var isActivityActive: Bool { get }
 }
 ```
 
-## App Intents (위젯 + Live Activity)
-```swift
-struct CompleteEventIntent: AppIntent {
-    @Parameter var eventIdentifier: String
-    // → EventKitService.complete() → LiveActivityService.end() → 위젯 리로드
-}
+## 편집 모드 상태 관리
 
-struct SnoozeEventIntent: AppIntent {
-    @Parameter var eventIdentifier: String
-    // → NotificationService.scheduleSnooze(10분) → LiveActivity 업데이트
+편집 모드는 트랜지언트 UI 상태 → **DayView @State**로 관리 (ViewModel 아님).
+
+```swift
+// DayView @State
+@State var phantomBlock: PhantomBlock?       // {hour, minute, calendar}
+@State var editingItemId: String?            // 편집 중인 블록 ID
+@State var showPhantomSheet: Bool = false
+@State var crossDayDragState: CrossDayDragState?
+
+// TimelineView에 Binding으로 전달
+editingItemId: Binding<String?>
+onResizeStart: (String, Date) -> Void
+onResizeEnd: (String, Date) -> Void
+onMoveItem: (String, Date, Date) -> Void
+onDuplicateItem: (String) -> Void
+onCrossDayDrag: (String, Edge) -> Void
+phantomBlock: PhantomBlock?
+```
+
+이유: UI 제스처 상태가 서비스 레이어와 혼재되면 책임 경계가 흐려짐.
+
+## z-index / 제스처 우선순위
+
+```
+ZStack 순서 (아래 → 위):
+1. timeLines + 시간라벨 long press gesture
+2. emptySlotGestures (빈 시간대 long press)
+3. eventBlocks (zIndex: 1)
+4. phantomBlock (zIndex: 0.5)
+5. currentTimeLine (zIndex: 2)
+6. editingOverlay — 핸들 + toolbar (zIndex: 3)
+```
+
+편집 모드 중: `editingItemId != nil` → 빈 시간대 long press 비활성화, 타임라인 좌우 스와이프 비활성화.
+
+## 날짜 간 블록 이동 (overlay 패턴)
+
+드래그 중인 블록을 타임라인에서 분리 → DayView 최상위 overlay로 렌더링. 타임라인 전환 애니메이션과 독립 동작.
+
+```swift
+struct CrossDayDragState {
+    let item: TicItem
+    var currentOffset: CGSize   // 손가락 위치
+    var targetDate: Date        // 이동할 날짜
 }
+```
+
+## 타임라인 레이아웃 알고리즘
+column-packing: 시작 시간 정렬 → 충돌 클러스터 그룹화 → 탐욕적 열 할당 → 너비 균등 분할. 뷰 body 바깥에서 `LayoutAttributes` 미리 계산, 날짜별 캐시.
+
+## 딥링킹
+```swift
+// URL: tic://day?date=2026-04-16
+// ticApp.onOpenURL → selectedDate + scope = .day
 ```
 
 ## 네비게이션
 ```swift
 enum CalendarScope { case year, month, day }
 ```
-- `MagnifyGesture`로 pinch 감지 → scope 전환
-- `.matchedGeometryEffect`로 줌 애니메이션
-- `@State var selectedDate: Date`가 표시할 날짜/월 결정
-- 날짜 레이블 탭 → `selectedDate = .now`
-
-## 타임라인 레이아웃 알고리즘
-겹치는 일정을 위한 column-packing:
-1. 시작 시간 기준 이벤트 정렬
-2. 충돌 클러스터로 그룹화 (겹치는 시간 범위)
-3. 클러스터 내에서 탐욕적으로 열 할당 (사용 가능한 첫 번째 열)
-4. 열 수에 따라 너비 균등 분할
-
-구현: 뷰 body 바깥에서 `LayoutAttributes` (widthFraction, xOffset) 미리 계산, 날짜별 캐시.
-
-## 딥링킹 (위젯 → 앱)
-```swift
-// URL 스킴: tic://day?date=2026-04-16
-// ticApp에서 .onOpenURL 처리 → selectedDate 설정 + scope = .day
-```
+MagnifyGesture → scope 전환. matchedGeometryEffect → 줌 애니메이션.

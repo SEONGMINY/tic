@@ -7,18 +7,20 @@ struct MonthView: View {
     private let columns = Array(repeating: GridItem(.flexible()), count: 7)
     private let weekdays = ["일", "월", "화", "수", "목", "금", "토"]
 
-    @State private var anchorMonth: Date = .now
-    @State private var initialized = false
-    @State private var monthsBefore: Int = 48
-    @State private var monthsAfter: Int = 48
-    @State private var isExpanding = false
+    // 기준점: 2026년 1월 (고정). 모든 offset은 이 기준으로 계산.
+    private static let baseDate: Date = {
+        Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+    }()
+    // ±120개월 = ±10년 (2016년 1월 ~ 2036년 1월)
+    private let rangeStart = -120
+    private let rangeEnd = 120
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    let pages = allPages
-                    ForEach(Array(pages.enumerated()), id: \.element) { index, month in
+                    ForEach(rangeStart...rangeEnd, id: \.self) { offset in
+                        let month = Self.monthDate(offset: offset)
                         MonthSection(
                             month: month,
                             viewModel: viewModel,
@@ -26,58 +28,31 @@ struct MonthView: View {
                             columns: columns,
                             weekdays: weekdays
                         )
-                        .id(month)
+                        .id(offset)
                         .onAppear {
                             viewModel.displayedYear = month.year
-                            expandIfNeeded(index: index, total: pages.count)
                         }
                     }
                 }
             }
             .onAppear {
-                if !initialized {
-                    anchorMonth = viewModel.displayedMonth.startOfMonth
-                    initialized = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        proxy.scrollTo(anchorMonth, anchor: .top)
-                    }
+                let targetOffset = Self.offsetForDate(viewModel.displayedMonth)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    proxy.scrollTo(targetOffset, anchor: .top)
                 }
             }
         }
     }
 
-    // 캐시된 배열 — body 내에서 1회만 계산
-    private var allPages: [Date] {
-        let calendar = Calendar.current
-        return (-monthsBefore...monthsAfter).compactMap { offset in
-            calendar.date(byAdding: .month, value: offset, to: anchorMonth)?.startOfMonth
-        }
+    // offset → Date 변환 (baseDate 기준)
+    private static func monthDate(offset: Int) -> Date {
+        Calendar.current.date(byAdding: .month, value: offset, to: baseDate)!.startOfMonth
     }
 
-    // debounce + 플래그로 무한 루프 방지
-    private func expandIfNeeded(index: Int, total: Int) {
-        guard !isExpanding else { return }
-        let needsExpand: Bool
-        if index <= 3 {
-            needsExpand = true
-        } else if index >= total - 4 {
-            needsExpand = true
-        } else {
-            needsExpand = false
-        }
-        guard needsExpand else { return }
-
-        isExpanding = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if index <= 3 {
-                monthsBefore += 24
-            } else {
-                monthsAfter += 24
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                isExpanding = false
-            }
-        }
+    // Date → offset 변환
+    private static func offsetForDate(_ date: Date) -> Int {
+        let comps = Calendar.current.dateComponents([.month], from: baseDate, to: date.startOfMonth)
+        return comps.month ?? 0
     }
 }
 
@@ -156,7 +131,7 @@ private struct MonthSection: View {
         let isToday = date.isToday
         let counts = eventCounts ?? [:]
         let count = min(counts[date.day] ?? 0, 3)
-        let isWeekend = date.weekday == 1 || date.weekday == 7  // 일=1, 토=7
+        let isWeekend = date.weekday == 1 || date.weekday == 7
 
         return VStack(spacing: 4) {
             Text(verbatim: "\(date.day)")

@@ -1,6 +1,6 @@
 import AppIntents
 import ActivityKit
-import EventKit
+import CoreGraphics
 import UserNotifications
 import WidgetKit
 
@@ -21,6 +21,7 @@ extension CGColor {
 
 struct CompleteEventIntent: AppIntent {
     static var title: LocalizedStringResource = "완료"
+    static var openAppWhenRun: Bool = true  // 앱을 열어서 메인 앱에서 완료 처리
 
     @Parameter(title: "Event ID")
     var eventIdentifier: String
@@ -32,50 +33,27 @@ struct CompleteEventIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult {
-        let store = EKEventStore()
-
-        // 리마인더 완료 처리
-        if let reminder = store.calendarItem(withIdentifier: eventIdentifier) as? EKReminder {
-            reminder.isCompleted = true
-            try store.save(reminder, commit: true)
-        }
-
         // Live Activity 종료
         for activity in Activity<TicActivityAttributes>.activities {
-            if activity.attributes.eventIdentifier == eventIdentifier {
-                await activity.end(nil, dismissalPolicy: .immediate)
-            }
+            let finalContent = ActivityContent(state: activity.content.state, staleDate: nil)
+            await activity.end(finalContent, dismissalPolicy: .immediate)
         }
 
-        // 위젯 캐시 갱신
-        WidgetCache.save(events: buildUpdatedCache(store: store))
+        // 앱에 완료 이벤트 전달 (메인 앱에서 EventKit 처리)
+        NotificationCenter.default.post(
+            name: Notification.Name("ticCompleteEvent"),
+            object: nil,
+            userInfo: ["eventIdentifier": eventIdentifier]
+        )
+
         WidgetCenter.shared.reloadAllTimelines()
-
         return .result()
-    }
-
-    private func buildUpdatedCache(store: EKEventStore) -> [WidgetEventItem] {
-        let now = Date()
-        let end = Calendar.current.date(byAdding: .day, value: 7, to: now)!
-        let predicate = store.predicateForEvents(withStart: now, end: end, calendars: nil)
-        let events = store.events(matching: predicate)
-        return Array(events.prefix(20).map { event in
-            WidgetEventItem(
-                id: event.eventIdentifier,
-                title: event.title ?? "",
-                startDate: event.startDate,
-                endDate: event.endDate,
-                isReminder: false,
-                isCompleted: false,
-                calendarColorHex: event.calendar.cgColor.hexString,
-                isAllDay: event.isAllDay
-            )
-        })
     }
 }
 
 struct SnoozeEventIntent: AppIntent {
     static var title: LocalizedStringResource = "10분 후 알림"
+    static var openAppWhenRun: Bool = false
 
     @Parameter(title: "Event ID")
     var eventIdentifier: String
@@ -87,17 +65,14 @@ struct SnoozeEventIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult {
+        // 10분 후 로컬 알림 등록
         let center = UNUserNotificationCenter.current()
-
-        // 기존 알림 제거
         center.removePendingNotificationRequests(withIdentifiers: ["\(eventIdentifier)-snooze"])
 
-        // 10분 후 알림 등록
         let content = UNMutableNotificationContent()
         content.title = "일정 알림"
         content.body = "스누즈한 일정을 확인하세요."
         content.sound = .default
-        content.categoryIdentifier = "TIC_EVENT"
 
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 600, repeats: false)
         let request = UNNotificationRequest(
@@ -107,15 +82,10 @@ struct SnoozeEventIntent: AppIntent {
         )
         try await center.add(request)
 
-        // Live Activity 업데이트 (스누즈 상태 표시)
+        // Live Activity 종료
         for activity in Activity<TicActivityAttributes>.activities {
-            if activity.attributes.eventIdentifier == eventIdentifier {
-                // Activity를 유지하되 갱신
-                let state = activity.content.state
-                await activity.update(
-                    ActivityContent(state: state, staleDate: Date().addingTimeInterval(600))
-                )
-            }
+            let finalContent = ActivityContent(state: activity.content.state, staleDate: nil)
+            await activity.end(finalContent, dismissalPolicy: .immediate)
         }
 
         WidgetCenter.shared.reloadAllTimelines()
