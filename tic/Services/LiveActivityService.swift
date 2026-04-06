@@ -14,31 +14,16 @@ class LiveActivityService {
         return Date().timeIntervalSince(lastEnd) > 30
     }
 
+    /// 오늘의 전체 일정으로 Live Activity 시작
     func start(events: [TicItem]) throws {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         guard canStart else { return }
 
-        let now = Date()
-        let activityEvents = events.prefix(10).map { item in
-            ActivityEvent(
-                title: item.title,
-                startDate: item.startDate ?? now,
-                endDate: item.endDate ?? now,
-                colorHex: item.calendarColor.hexString
-            )
-        }
+        let filtered = filterAndSort(events)
+        guard !filtered.isEmpty else { return }
 
-        // currentIndex/nextIndex 계산
-        var currentIndex: Int?
-        var nextIndex: Int?
-        for (i, item) in events.prefix(10).enumerated() {
-            guard let start = item.startDate, let end = item.endDate else { continue }
-            if start <= now && end > now && currentIndex == nil {
-                currentIndex = i
-            } else if start > now && nextIndex == nil {
-                nextIndex = i
-            }
-        }
+        let activityEvents = toActivityEvents(filtered)
+        let (currentIndex, nextIndex) = computeIndices(events: activityEvents)
 
         let attributes = TicActivityAttributes()
         let state = TicActivityAttributes.ContentState(
@@ -46,7 +31,7 @@ class LiveActivityService {
             currentIndex: currentIndex,
             nextIndex: nextIndex
         )
-        let staleDate = events.compactMap(\.endDate).max()
+        let staleDate = activityEvents.map(\.endDate).max()
         let content = ActivityContent(state: state, staleDate: staleDate)
         let activity = try Activity.request(
             attributes: attributes,
@@ -56,42 +41,27 @@ class LiveActivityService {
         currentActivity = activity
     }
 
+    /// 상태 갱신 (currentIndex/nextIndex 재계산)
     func update(events: [TicItem]) {
         guard let activity = currentActivity else { return }
 
-        let now = Date()
-        let activityEvents = events.prefix(10).map { item in
-            ActivityEvent(
-                title: item.title,
-                startDate: item.startDate ?? now,
-                endDate: item.endDate ?? now,
-                colorHex: item.calendarColor.hexString
-            )
-        }
-
-        var currentIndex: Int?
-        var nextIndex: Int?
-        for (i, item) in events.prefix(10).enumerated() {
-            guard let start = item.startDate, let end = item.endDate else { continue }
-            if start <= now && end > now && currentIndex == nil {
-                currentIndex = i
-            } else if start > now && nextIndex == nil {
-                nextIndex = i
-            }
-        }
+        let filtered = filterAndSort(events)
+        let activityEvents = toActivityEvents(filtered)
+        let (currentIndex, nextIndex) = computeIndices(events: activityEvents)
 
         let state = TicActivityAttributes.ContentState(
             events: activityEvents,
             currentIndex: currentIndex,
             nextIndex: nextIndex
         )
-        let staleDate = events.compactMap(\.endDate).max()
+        let staleDate = activityEvents.map(\.endDate).max()
         let content = ActivityContent(state: state, staleDate: staleDate)
         Task {
             await activity.update(content)
         }
     }
 
+    /// 특정 activity 종료
     func end(for identifier: String) {
         guard let activity = currentActivity else { return }
         let state = activity.content.state
@@ -103,6 +73,7 @@ class LiveActivityService {
         lastEndTime = Date()
     }
 
+    /// 모든 activity 종료
     func endAll() {
         Task {
             for activity in Activity<TicActivityAttributes>.activities {
@@ -111,6 +82,50 @@ class LiveActivityService {
         }
         currentActivity = nil
         lastEndTime = Date()
+    }
+
+    // MARK: - Private Helpers
+
+    private func filterAndSort(_ events: [TicItem]) -> [TicItem] {
+        events
+            .filter { $0.startDate != nil && $0.endDate != nil && !$0.isAllDay }
+            .sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
+            .prefix(10)
+            .map { $0 }
+    }
+
+    private func toActivityEvents(_ items: [TicItem]) -> [ActivityEvent] {
+        let now = Date()
+        return items.map { item in
+            ActivityEvent(
+                title: item.title,
+                startDate: item.startDate ?? now,
+                endDate: item.endDate ?? now,
+                colorHex: item.calendarColor.hexString
+            )
+        }
+    }
+
+    private func computeIndices(events: [ActivityEvent]) -> (current: Int?, next: Int?) {
+        let now = Date()
+        var currentIdx: Int? = nil
+        var nextIdx: Int? = nil
+
+        for (i, event) in events.enumerated() {
+            if event.startDate <= now && now < event.endDate {
+                currentIdx = i
+            }
+            if event.startDate > now && nextIdx == nil {
+                nextIdx = i
+            }
+        }
+
+        // currentIndex가 있고 nextIdx가 없으면, current 다음 일정을 next로
+        if let ci = currentIdx, nextIdx == nil, ci + 1 < events.count {
+            nextIdx = ci + 1
+        }
+
+        return (currentIdx, nextIdx)
     }
 }
 

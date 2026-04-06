@@ -194,28 +194,17 @@ struct ContentView: View {
         // Live Activity 지원 확인
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        let now = Date()
-        let items = await eventKitService.fetchAllItems(for: now)
+        let todayItems = await eventKitService.fetchAllItems(for: Date())
+        let timedItems = todayItems.filter { $0.startDate != nil && $0.endDate != nil && !$0.isAllDay }
 
-        // 시간 있는 일정만 필터 (하루종일 제외)
-        let timeItems = items.filter { item in
-            guard let start = item.startDate, let end = item.endDate else { return false }
-            let minutesBefore = start.timeIntervalSince(now) / 60
-            return minutesBefore <= 30 && end > now && !item.isAllDay
+        if timedItems.isEmpty {
+            return
         }
 
-        if !timeItems.isEmpty {
-            if !liveActivityService.isActivityActive {
-                do {
-                    try liveActivityService.start(events: timeItems)
-                } catch {
-                    // Live Activity start failed
-                }
-            } else {
-                liveActivityService.update(events: timeItems)
-            }
-        } else if liveActivityService.isActivityActive {
-            liveActivityService.endAll()
+        if liveActivityService.isActivityActive {
+            liveActivityService.update(events: timedItems)
+        } else {
+            try? liveActivityService.start(events: timedItems)
         }
     }
 
