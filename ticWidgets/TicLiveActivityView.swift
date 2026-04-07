@@ -162,46 +162,115 @@ private struct ProgressLineView: View {
             let progressX = totalWidth * progress
 
             ZStack(alignment: .leading) {
-                // 실선 (경과)
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: 10))
+                    path.addLine(to: CGPoint(x: totalWidth, y: 10))
+                }
+                .stroke(
+                    Color.white.opacity(0.18),
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [6, 6])
+                )
+
                 if progressX > 0 {
                     Path { path in
-                        path.move(to: CGPoint(x: 0, y: 8))
-                        path.addLine(to: CGPoint(x: progressX, y: 8))
+                        path.move(to: CGPoint(x: 0, y: 10))
+                        path.addLine(to: CGPoint(x: progressX, y: 10))
                     }
-                    .stroke(.white, lineWidth: 2)
+                    .stroke(
+                        Color.orange,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
                 }
 
-                // 점선 (남은)
-                if progressX < totalWidth {
-                    Path { path in
-                        path.move(to: CGPoint(x: progressX, y: 8))
-                        path.addLine(to: CGPoint(x: totalWidth, y: 8))
-                    }
-                    .stroke(.white.opacity(0.5), style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
-                }
-
-                // 각 일정 dot
                 ForEach(Array(events.enumerated()), id: \.offset) { index, event in
                     let x = xPosition(for: event.startDate, in: range, totalWidth: totalWidth)
-                    let isCurrent = index == currentIndex
-                    let isPast = event.endDate < now
-
-                    Circle()
-                        .fill(Color(hex: event.colorHex))
-                        .frame(width: isCurrent ? 12 : 8, height: isCurrent ? 12 : 8)
-                        .opacity(isPast ? 0.6 : 1.0)
-                        .shadow(color: isCurrent ? Color(hex: event.colorHex).opacity(0.6) : .clear, radius: 4)
-                        .position(x: max(min(x, totalWidth - 6), 6), y: 8)
+                    ProgressEventDot(
+                        state: dotState(for: event, index: index, now: now),
+                        currentProgress: eventProgress(for: event, now: now)
+                    )
+                    .position(x: max(min(x, totalWidth - 10), 10), y: 10)
                 }
             }
         }
-        .frame(height: 16)
+        .frame(height: 22)
     }
 
     private func xPosition(for date: Date, in range: (start: Date, end: Date, duration: TimeInterval), totalWidth: CGFloat) -> CGFloat {
         guard range.duration > 0 else { return 0 }
         let ratio = CGFloat(date.timeIntervalSince(range.start) / range.duration)
         return totalWidth * min(max(ratio, 0), 1)
+    }
+
+    private func dotState(for event: ActivityEvent, index: Int, now: Date) -> ProgressEventDot.State {
+        if index == currentIndex || (event.startDate <= now && now < event.endDate) {
+            return .current
+        }
+        if event.endDate <= now {
+            return .past
+        }
+        return .future
+    }
+
+    private func eventProgress(for event: ActivityEvent, now: Date) -> CGFloat {
+        let duration = event.endDate.timeIntervalSince(event.startDate)
+        guard duration > 0 else { return 1 }
+        let elapsed = now.timeIntervalSince(event.startDate)
+        return min(max(CGFloat(elapsed / duration), 0), 1)
+    }
+}
+
+private struct ProgressEventDot: View {
+    enum State {
+        case past
+        case current
+        case future
+    }
+
+    let state: State
+    let currentProgress: CGFloat
+
+    var body: some View {
+        switch state {
+        case .past:
+            ZStack {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 10, height: 10)
+                Circle()
+                    .fill(Color.black.opacity(0.75))
+                    .frame(width: 3.5, height: 3.5)
+            }
+        case .current:
+            ZStack {
+                Circle()
+                    .fill(Color.black.opacity(0.78))
+                    .frame(width: 18, height: 18)
+                Circle()
+                    .stroke(Color.orange.opacity(0.24), lineWidth: 2.5)
+                    .frame(width: 18, height: 18)
+                Circle()
+                    .trim(from: 0, to: max(currentProgress, 0.02))
+                    .stroke(Color.orange, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 18, height: 18)
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 6, height: 6)
+            }
+            .shadow(color: Color.orange.opacity(0.35), radius: 5)
+        case .future:
+            ZStack {
+                Circle()
+                    .fill(Color.black.opacity(0.72))
+                    .frame(width: 16, height: 16)
+                Circle()
+                    .stroke(Color.white.opacity(0.22), lineWidth: 2)
+                    .frame(width: 16, height: 16)
+                Circle()
+                    .fill(Color.white.opacity(0.5))
+                    .frame(width: 4.5, height: 4.5)
+            }
+        }
     }
 }
 
@@ -313,4 +382,3 @@ private func deepLinkURL(for events: [ActivityEvent]) -> URL {
     formatter.dateFormat = "yyyy-MM-dd"
     return URL(string: "tic://day?date=\(formatter.string(from: date))")!
 }
-
