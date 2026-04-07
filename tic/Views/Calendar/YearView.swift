@@ -6,6 +6,7 @@ struct YearView: View {
 
     @State private var initialized = false
     @State private var scrollToTodayTrigger = false
+    @State private var buttonTapped = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
     private let years = Array(1...9999)
@@ -46,18 +47,24 @@ struct YearView: View {
                 }
             }
 
-            // 오늘 버튼
+            // 올해 버튼
             Button {
+                withAnimation(.spring(duration: 0.15)) { buttonTapped = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    withAnimation(.spring(duration: 0.15)) { buttonTapped = false }
+                }
                 scrollToTodayTrigger.toggle()
             } label: {
                 Text("올해")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(buttonTapped ? .white : .orange)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                    .background(buttonTapped ? Color.orange : Color.clear)
                     .background(.ultraThinMaterial)
                     .clipShape(Capsule())
             }
+            .scaleEffect(buttonTapped ? 1.15 : 1.0)
             .padding(.leading, 16)
             .padding(.bottom, 16)
         }

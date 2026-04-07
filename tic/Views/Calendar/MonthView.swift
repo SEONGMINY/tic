@@ -16,6 +16,7 @@ struct MonthView: View {
     private let rangeEnd = 120
 
     @State private var scrollToThisMonthTrigger = false
+    @State private var buttonTapped = false
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -54,16 +55,22 @@ struct MonthView: View {
 
             // 이번달 버튼
             Button {
+                withAnimation(.spring(duration: 0.15)) { buttonTapped = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    withAnimation(.spring(duration: 0.15)) { buttonTapped = false }
+                }
                 scrollToThisMonthTrigger.toggle()
             } label: {
                 Text("이번달")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(buttonTapped ? .white : .orange)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
+                    .background(buttonTapped ? Color.orange : Color.clear)
                     .background(.ultraThinMaterial)
                     .clipShape(Capsule())
             }
+            .scaleEffect(buttonTapped ? 1.15 : 1.0)
             .padding(.leading, 16)
             .padding(.bottom, 16)
         }
