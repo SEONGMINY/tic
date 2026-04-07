@@ -18,13 +18,16 @@ struct TimelineView: View {
     // Edit mode
     @Binding var editingItemId: String?
     @Binding var showEditToolbar: Bool
+    @Binding var isEditingGestureActive: Bool
     var onResizeItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onMoveItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onDuplicateItem: (_ itemId: String) -> Void
-    var onCrossDayDragStart: ((_ item: TicItem, _ horizontalTranslation: CGFloat) -> Void)?
+    var onEdgeHover: ((_ item: TicItem, _ direction: Edge) -> Void)?
+    var onEdgeClear: (() -> Void)?
 
     let hourHeight: CGFloat = 60
     private let timeColumnWidth: CGFloat = 52
+    private let eventAreaLeadingInset: CGFloat = 8
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -39,7 +42,7 @@ struct TimelineView: View {
 
                     // 3. Event blocks (non-editing)
                     GeometryReader { geometry in
-                        let eventAreaWidth = geometry.size.width - timeColumnWidth
+                        let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
                         ForEach(timedItems, id: \.id) { item in
                             if item.id != editingItemId {
                                 eventBlock(for: item, containerWidth: eventAreaWidth)
@@ -52,11 +55,11 @@ struct TimelineView: View {
                     if let phantom = phantomBlock {
                         GeometryReader { geometry in
                             let yPos = (CGFloat(phantom.hour) + CGFloat(phantom.minute) / 60.0) * hourHeight
-                            let eventAreaWidth = geometry.size.width - timeColumnWidth
+                            let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.orange.opacity(0.4))
                                 .frame(width: eventAreaWidth - 2, height: hourHeight - 1)
-                                .offset(x: timeColumnWidth, y: yPos)
+                                .offset(x: timeColumnWidth + eventAreaLeadingInset, y: yPos)
                         }
                         .zIndex(0.5)
                     }
@@ -68,16 +71,16 @@ struct TimelineView: View {
                             .id("nowLine")
                     }
 
-                    // 6. Editing block overlay — zIndex 3
+                    // 6. Editing block overlay — zIndex 3, NO GeometryReader to avoid re-layout jitter
                     if let editId = editingItemId,
                        let item = timedItems.first(where: { $0.id == editId }) {
                         GeometryReader { geometry in
-                            let containerWidth = geometry.size.width - timeColumnWidth
-                            let attrs = layout[item.id]
-                            let width = (attrs?.widthFraction ?? 1.0) * containerWidth
-                            let xPos = timeColumnWidth + (attrs?.xOffset ?? 0) * containerWidth
+                            let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
+                            let editAttrs = layout[item.id]
+                            let editWidth = (editAttrs?.widthFraction ?? 1.0) * eventAreaWidth
+                            let editXPos = timeColumnWidth + eventAreaLeadingInset + (editAttrs?.xOffset ?? 0) * eventAreaWidth
 
-                            let bgColor: Color = {
+                            let editBgColor: Color = {
                                 if let cgColor = item.calendarColor as CGColor? {
                                     return Color(cgColor: cgColor)
                                 }
@@ -86,34 +89,42 @@ struct TimelineView: View {
 
                             EditableEventBlock(
                                 item: item,
-                                bgColor: bgColor,
-                                frameWidth: max(width - 2, 0),
+                                bgColor: editBgColor,
+                                frameWidth: max(editWidth - 2, 0),
                                 baseYPos: yPosition(for: item.startDate),
                                 baseHeight: eventHeight(start: item.startDate, end: item.endDate),
-                                xPos: xPos,
+                                xPos: editXPos,
                                 hourHeight: hourHeight,
                                 totalTimelineHeight: 24 * hourHeight + 20,
+                                containerWidth: geometry.size.width,
                                 showEditToolbar: $showEditToolbar,
                                 editingItemId: $editingItemId,
+                                isEditingGestureActive: $isEditingGestureActive,
                                 onDeleteItem: onDeleteItem,
                                 onResizeItem: onResizeItem,
                                 onMoveItem: onMoveItem,
                                 onDuplicateItem: onDuplicateItem,
-                                onCrossDayDragStart: onCrossDayDragStart
+                                onEdgeHover: onEdgeHover,
+                                onEdgeClear: onEdgeClear
                             )
                         }
                         .zIndex(3)
                     }
                 }
                 .frame(height: 24 * hourHeight + 20)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if editingItemId != nil {
-                        editingItemId = nil
-                        showEditToolbar = false
+                // Tap to dismiss edit mode — only when NOT dragging (via background layer)
+                .background {
+                    if editingItemId != nil && !isEditingGestureActive {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                editingItemId = nil
+                                showEditToolbar = false
+                            }
                     }
                 }
             }
+            .scrollDisabled(isEditingGestureActive)
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     if selectedDate.isToday {
@@ -161,7 +172,7 @@ struct TimelineView: View {
 
     private var emptySlotGestures: some View {
         GeometryReader { geometry in
-            let eventAreaWidth = geometry.size.width - timeColumnWidth
+            let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
             ForEach(0..<24, id: \.self) { hour in
                 Color.clear
                     .frame(width: eventAreaWidth, height: hourHeight)
@@ -172,7 +183,7 @@ struct TimelineView: View {
                             onTimeSlotLongPress(date)
                         }
                     }
-                    .offset(x: timeColumnWidth, y: CGFloat(hour) * hourHeight)
+                    .offset(x: timeColumnWidth + eventAreaLeadingInset, y: CGFloat(hour) * hourHeight)
             }
         }
     }
@@ -185,7 +196,7 @@ struct TimelineView: View {
         let yPos = yPosition(for: item.startDate)
         let height = eventHeight(start: item.startDate, end: item.endDate)
         let width = (attrs?.widthFraction ?? 1.0) * containerWidth
-        let xPos = timeColumnWidth + (attrs?.xOffset ?? 0) * containerWidth
+        let xPos = timeColumnWidth + eventAreaLeadingInset + (attrs?.xOffset ?? 0) * containerWidth
         let inEditMode = editingItemId != nil
 
         let bgColor: Color = {
@@ -279,8 +290,8 @@ struct TimelineView: View {
                     .offset(x: timeColumnWidth - 4)
                 Rectangle()
                     .fill(.red)
-                    .frame(width: geometry.size.width - timeColumnWidth, height: 1)
-                    .offset(x: timeColumnWidth)
+                    .frame(width: geometry.size.width - timeColumnWidth - eventAreaLeadingInset, height: 1)
+                    .offset(x: timeColumnWidth + eventAreaLeadingInset)
             }
             .offset(y: y)
         }

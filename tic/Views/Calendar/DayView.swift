@@ -1,14 +1,10 @@
 import SwiftUI
 
-struct CrossDayDragState {
+private struct PendingEditingDates {
+    let itemId: String
     let item: TicItem
-    let originalStart: Date
-    let originalEnd: Date
-    let originalDate: Date
-    var currentOffset: CGSize
-    var targetDate: Date
-    var targetHour: Int
-    var targetMinute: Int
+    let start: Date
+    let end: Date
 }
 
 struct DayView: View {
@@ -34,10 +30,14 @@ struct DayView: View {
     // Edit mode state
     @State private var editingItemId: String?
     @State private var showEditToolbar: Bool = true
+    @State private var isEditingGestureActive: Bool = false
+    @State private var pendingEditingDates: PendingEditingDates?
 
-    // Cross-day drag state
-    @State private var crossDayDrag: CrossDayDragState?
-    @State private var crossDayLastTransitionX: CGFloat = 0
+    // Edge hover state (cross-day)
+    @State private var edgeHoverDirection: Edge?
+    @State private var edgeHoverItemId: String?
+    @State private var edgeHoverTimer: Timer?
+    @State private var edgeHoverProgress: CGFloat = 0
 
     @Namespace private var dayAnimation
 
@@ -47,6 +47,32 @@ struct DayView: View {
         !dayViewModel.timedItems.isEmpty ||
         !dayViewModel.allDayItems.isEmpty ||
         !dayViewModel.timelessReminders.isEmpty
+    }
+
+    private var effectiveTimedItems: [TicItem] {
+        var items = dayViewModel.timedItems
+            .map { item in
+                guard let pendingEditingDates, pendingEditingDates.itemId == item.id else {
+                    return item
+                }
+                return item.updatingDates(
+                    startDate: pendingEditingDates.start,
+                    endDate: pendingEditingDates.end
+                )
+            }
+
+        if let pendingEditingDates,
+           items.contains(where: { $0.id == pendingEditingDates.itemId }) == false,
+           pendingEditingDates.start.isSameDay(as: viewModel.selectedDate) {
+            items.append(
+                pendingEditingDates.item.updatingDates(
+                    startDate: pendingEditingDates.start,
+                    endDate: pendingEditingDates.end
+                )
+            )
+        }
+
+        return items.sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }
 
     var body: some View {
@@ -71,8 +97,11 @@ struct DayView: View {
                     }
 
                     TimelineView(
-                        timedItems: dayViewModel.timedItems,
-                        layout: dayViewModel.computeLayout(containerWidth: UIScreen.main.bounds.width - 60),
+                        timedItems: effectiveTimedItems,
+                        layout: dayViewModel.computeLayout(
+                            for: effectiveTimedItems,
+                            containerWidth: UIScreen.main.bounds.width - 60
+                        ),
                         selectedDate: viewModel.selectedDate,
                         phantomBlock: phantomBlock,
                         onEventTap: { item in onEditItem(item) },
@@ -94,14 +123,39 @@ struct DayView: View {
                         },
                         editingItemId: $editingItemId,
                         showEditToolbar: $showEditToolbar,
+                        isEditingGestureActive: $isEditingGestureActive,
                         onResizeItem: { itemId, newStart, newEnd in
                             if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
-                                try? eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+                                do {
+                                    try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        pendingEditingDates = PendingEditingDates(
+                                            itemId: itemId,
+                                            item: item,
+                                            start: newStart,
+                                            end: newEnd
+                                        )
+                                    }
+                                } catch {
+                                    pendingEditingDates = nil
+                                }
                             }
                         },
                         onMoveItem: { itemId, newStart, newEnd in
                             if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
-                                try? eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+                                do {
+                                    try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        pendingEditingDates = PendingEditingDates(
+                                            itemId: itemId,
+                                            item: item,
+                                            start: newStart,
+                                            end: newEnd
+                                        )
+                                    }
+                                } catch {
+                                    pendingEditingDates = nil
+                                }
                             }
                         },
                         onDuplicateItem: { itemId in
@@ -109,8 +163,11 @@ struct DayView: View {
                                 try? eventKitService.duplicate(item)
                             }
                         },
-                        onCrossDayDragStart: { item, horizontalTranslation in
-                            handleCrossDayDragStart(item: item, horizontalTranslation: horizontalTranslation)
+                        onEdgeHover: { item, direction in
+                            startEdgeHover(item: item, direction: direction)
+                        },
+                        onEdgeClear: {
+                            cancelEdgeHover()
                         }
                     )
                 }
@@ -131,14 +188,12 @@ struct DayView: View {
                                 slideDirection = .leading
                                 withAnimation(.easeInOut(duration: 0.25)) {
                                     contentId = UUID()
-                                    weekStripId = UUID()
                                     viewModel.selectedDate = viewModel.selectedDate.adding(days: -1)
                                 }
                             } else {
                                 slideDirection = .trailing
                                 withAnimation(.easeInOut(duration: 0.25)) {
                                     contentId = UUID()
-                                    weekStripId = UUID()
                                     viewModel.selectedDate = viewModel.selectedDate.adding(days: 1)
                                 }
                             }
@@ -151,20 +206,20 @@ struct DayView: View {
                 }
             }
             .overlay {
-                crossDayDragOverlay
+                edgeHoverIndicator
             }
         }
         .task {
-            await dayViewModel.loadItems(for: viewModel.selectedDate, service: eventKitService)
+            await refreshDayItems()
         }
         .onChange(of: viewModel.selectedDate) { _, _ in
             Task {
-                await dayViewModel.loadItems(for: viewModel.selectedDate, service: eventKitService)
+                await refreshDayItems()
             }
         }
         .onChange(of: eventKitService.lastChangeDate) { _, _ in
             Task {
-                await dayViewModel.loadItems(for: viewModel.selectedDate, service: eventKitService)
+                await refreshDayItems()
             }
         }
         .sheet(isPresented: $showActionSheet) {
@@ -254,7 +309,6 @@ struct DayView: View {
                     slideDirection = direction
                     withAnimation(.easeInOut(duration: 0.25)) {
                         contentId = UUID()
-                        weekStripId = UUID()
                         viewModel.selectedDate = date
                     }
                 } label: {
@@ -347,129 +401,183 @@ struct DayView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Cross-Day Drag
+    // MARK: - Edge Hover (Cross-Day Move)
 
-    private func handleCrossDayDragStart(item: TicItem, horizontalTranslation: CGFloat) {
-        guard let start = item.startDate, let end = item.endDate else { return }
+    private func startEdgeHover(item: TicItem, direction: Edge) {
+        if edgeHoverTimer != nil, edgeHoverItemId == item.id, edgeHoverDirection == direction {
+            return
+        }
 
-        let direction: Int = horizontalTranslation > 0 ? -1 : 1
-        let newDate = viewModel.selectedDate.adding(days: direction)
+        cancelEdgeHover()
+        edgeHoverItemId = item.id
+        edgeHoverDirection = direction
+        edgeHoverProgress = 0
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
 
-        let calendar = Calendar.current
-        let hour = calendar.component(.hour, from: start)
-        let minute = calendar.component(.minute, from: start)
+        // Animate progress bar over 1 second
+        withAnimation(.linear(duration: 1.0)) {
+            edgeHoverProgress = 1.0
+        }
 
-        crossDayDrag = CrossDayDragState(
-            item: item,
-            originalStart: start,
-            originalEnd: end,
-            originalDate: viewModel.selectedDate,
-            currentOffset: .zero,
-            targetDate: newDate,
-            targetHour: hour,
-            targetMinute: minute
-        )
-        crossDayLastTransitionX = 0
-
-        slideDirection = direction > 0 ? .trailing : .leading
-        withAnimation(.easeInOut(duration: 0.25)) {
-            contentId = UUID()
-            weekStripId = UUID()
-            viewModel.selectedDate = newDate
+        // After 1 second: perform transition
+        edgeHoverTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [self] _ in
+            DispatchQueue.main.async {
+                performEdgeTransition()
+            }
         }
     }
 
-    @ViewBuilder
-    private var crossDayDragOverlay: some View {
-        if let drag = crossDayDrag {
-            let blockColor = Color(cgColor: drag.item.calendarColor)
-            let duration = drag.originalEnd.timeIntervalSince(drag.originalStart) / 3600.0
-            let blockHeight = max(CGFloat(duration) * 60, 16)
-
-            RoundedRectangle(cornerRadius: 4)
-                .fill(blockColor.opacity(0.85))
-                .overlay(alignment: .topLeading) {
-                    Text(drag.item.title)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(4)
-                }
-                .frame(
-                    width: UIScreen.main.bounds.width - 60,
-                    height: blockHeight
-                )
-                .shadow(radius: 8, y: 4)
-                .position(
-                    x: UIScreen.main.bounds.width / 2 + 4,
-                    y: 200 + drag.currentOffset.height
-                )
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            crossDayDrag?.currentOffset = value.translation
-
-                            // Additional date transition on continued horizontal drag
-                            let deltaX = value.translation.width - crossDayLastTransitionX
-                            if abs(deltaX) > 60 {
-                                let dir: Int = deltaX > 0 ? -1 : 1
-                                let nextDate = (crossDayDrag?.targetDate ?? viewModel.selectedDate).adding(days: dir)
-                                crossDayDrag?.targetDate = nextDate
-                                crossDayLastTransitionX = value.translation.width
-
-                                slideDirection = dir > 0 ? .trailing : .leading
-                                withAnimation(.easeInOut(duration: 0.25)) {
-                                    contentId = UUID()
-                                    weekStripId = UUID()
-                                    viewModel.selectedDate = nextDate
-                                }
-                            }
-                        }
-                        .onEnded { value in
-                            // Cancel: small translation → return to original date
-                            if abs(value.translation.height) < 20 && abs(value.translation.width) < 30 {
-                                if let d = crossDayDrag, d.targetDate != d.originalDate {
-                                    let dir: Edge = d.originalDate < d.targetDate ? .leading : .trailing
-                                    slideDirection = dir
-                                    withAnimation(.easeInOut(duration: 0.25)) {
-                                        contentId = UUID()
-                                        weekStripId = UUID()
-                                        viewModel.selectedDate = d.originalDate
-                                    }
-                                }
-                                crossDayDrag = nil
-                                // editingItemId is kept — edit mode maintained
-                                return
-                            }
-                            commitCrossDayDrag(finalTranslation: value.translation)
-                        }
-                )
+    private func cancelEdgeHover() {
+        edgeHoverTimer?.invalidate()
+        edgeHoverTimer = nil
+        edgeHoverItemId = nil
+        withAnimation(.easeOut(duration: 0.15)) {
+            edgeHoverDirection = nil
+            edgeHoverProgress = 0
         }
     }
 
-    private func commitCrossDayDrag(finalTranslation: CGSize) {
-        guard let drag = crossDayDrag else { return }
+    private func performEdgeTransition() {
+        guard let itemId = edgeHoverItemId,
+              let direction = edgeHoverDirection,
+              let item = currentEditingItem(for: itemId),
+              let start = item.startDate,
+              let end = item.endDate else {
+            cancelEdgeHover()
+            return
+        }
 
-        let hourHeight: CGFloat = 60
-        let baseY = CGFloat(drag.targetHour) * hourHeight + CGFloat(drag.targetMinute) / 60.0 * hourHeight
-        let finalY = max(0, baseY + finalTranslation.height)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
-        let hour = max(0, min(23, Int(finalY / hourHeight)))
-        let minuteFraction = (finalY - CGFloat(hour) * hourHeight) / hourHeight
-        let minute = max(0, min(45, Int(round(minuteFraction * 4)) * 15))
+        let dayDelta = direction == .leading ? -1 : 1
+        let newDate = viewModel.selectedDate.adding(days: dayDelta)
 
+        // Move item to new date at same time
         let calendar = Calendar.current
-        let duration = drag.originalEnd.timeIntervalSince(drag.originalStart)
-        var components = calendar.dateComponents([.year, .month, .day], from: drag.targetDate)
-        components.hour = hour
-        components.minute = minute
+        let duration = end.timeIntervalSince(start)
+        var components = calendar.dateComponents([.year, .month, .day], from: newDate)
+        components.hour = calendar.component(.hour, from: start)
+        components.minute = calendar.component(.minute, from: start)
 
         if let newStart = calendar.date(from: components) {
             let newEnd = newStart.addingTimeInterval(duration)
-            try? eventKitService.moveToDate(drag.item, newStart: newStart, newEnd: newEnd)
+            do {
+                try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+                pendingEditingDates = PendingEditingDates(
+                    itemId: item.id,
+                    item: item,
+                    start: newStart,
+                    end: newEnd
+                )
+            } catch {
+                cancelEdgeHover()
+                return
+            }
         }
 
-        crossDayDrag = nil
-        editingItemId = nil
+        // Navigate to new date
+        slideDirection = direction == .leading ? .leading : .trailing
+        withAnimation(.easeInOut(duration: 0.25)) {
+            viewModel.selectedDate = newDate
+        }
+
+        showEditToolbar = false
+        cancelEdgeHover()
+    }
+
+    private func refreshDayItems() async {
+        await dayViewModel.loadItems(for: viewModel.selectedDate, service: eventKitService)
+        resolvePendingEditingDates()
+    }
+
+    private func resolvePendingEditingDates() {
+        guard let pendingEditingDates else { return }
+        guard let updatedItem = dayViewModel.timedItems.first(where: { $0.id == pendingEditingDates.itemId }) else {
+            return
+        }
+
+        if updatedItem.startDate == pendingEditingDates.start &&
+            updatedItem.endDate == pendingEditingDates.end {
+            self.pendingEditingDates = nil
+        }
+    }
+
+    private func currentEditingItem(for itemId: String) -> TicItem? {
+        if let pendingEditingDates, pendingEditingDates.itemId == itemId {
+            return pendingEditingDates.item.updatingDates(
+                startDate: pendingEditingDates.start,
+                endDate: pendingEditingDates.end
+            )
+        }
+
+        return dayViewModel.timedItems.first(where: { $0.id == itemId })
+    }
+
+    @ViewBuilder
+    private var edgeHoverIndicator: some View {
+        if let direction = edgeHoverDirection {
+            let isLeading = direction == .leading
+            let targetDate = viewModel.selectedDate.adding(days: isLeading ? -1 : 1)
+            let dateText = formatEdgeDate(targetDate)
+
+            HStack {
+                if !isLeading { Spacer() }
+
+                VStack(spacing: 6) {
+                    Spacer()
+                    HStack(spacing: 4) {
+                        if isLeading {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        Text(dateText)
+                            .font(.system(size: 12, weight: .semibold))
+                        if !isLeading {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background {
+                        Capsule()
+                            .fill(.orange)
+                            .overlay(alignment: .bottom) {
+                                // Progress bar
+                                GeometryReader { geo in
+                                    Capsule()
+                                        .fill(.white.opacity(0.3))
+                                        .frame(width: geo.size.width * edgeHoverProgress, height: 3)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                                }
+                            }
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+                .frame(width: 44)
+                .background(
+                    LinearGradient(
+                        colors: [.orange.opacity(0.25), .clear],
+                        startPoint: isLeading ? .leading : .trailing,
+                        endPoint: isLeading ? .trailing : .leading
+                    )
+                )
+
+                if isLeading { Spacer() }
+            }
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
+
+    private func formatEdgeDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "M/d"
+        return formatter.string(from: date)
     }
 
     // MARK: - Helpers

@@ -13,20 +13,27 @@ struct EditableEventBlock: View {
     let xPos: CGFloat
     let hourHeight: CGFloat
     let totalTimelineHeight: CGFloat
+    let containerWidth: CGFloat
 
     @Binding var showEditToolbar: Bool
     @Binding var editingItemId: String?
+    @Binding var isEditingGestureActive: Bool
     var onDeleteItem: (TicItem) -> Void
     var onResizeItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onMoveItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onDuplicateItem: (_ itemId: String) -> Void
-    var onCrossDayDragStart: ((_ item: TicItem, _ horizontalTranslation: CGFloat) -> Void)?
+    var onEdgeHover: ((_ item: TicItem, _ direction: Edge) -> Void)?
+    var onEdgeClear: (() -> Void)?
 
     @State private var activeDrag: DragType = .none
-    @State private var crossDayDragTriggered = false
+    @State private var edgeDirection: Edge?
     @State private var dragOffset: CGFloat = 0
     @State private var tooltipTime: String?
     @State private var tooltipY: CGFloat = 0
+
+    private let handleSize: CGFloat = 10
+    private let handleHitSize: CGFloat = 32
+    private var handleInset: CGFloat { handleHitSize / 2 }
 
     private let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -34,56 +41,68 @@ struct EditableEventBlock: View {
         return f
     }()
 
-    // Computed visual position/size during drag
+    // Snapped visual Y position
     private var visualY: CGFloat {
         switch activeDrag {
-        case .resizeTop: return baseYPos + dragOffset
-        case .move: return baseYPos + dragOffset
+        case .resizeTop, .move: return baseYPos + dragOffset
         case .resizeBottom, .none: return baseYPos
         }
     }
 
+    // Snapped visual height
     private var visualHeight: CGFloat {
+        let minH: CGFloat = 30 // 30 minutes minimum
         switch activeDrag {
-        case .resizeTop: return max(baseHeight - dragOffset, hourHeight / 2)
-        case .resizeBottom: return max(baseHeight + dragOffset, hourHeight / 2)
+        case .resizeTop: return max(baseHeight - dragOffset, minH)
+        case .resizeBottom: return max(baseHeight + dragOffset, minH)
         case .move, .none: return baseHeight
         }
     }
 
-    private var frameH: CGFloat { max(visualHeight - 1, 16) }
+    private var clampedFrameH: CGFloat { max(visualHeight - 1, 16) }
 
     var body: some View {
+        // Fixed-size container prevents layout recalculation jitter
         ZStack(alignment: .topLeading) {
-            // Block content + handles + gesture
-            blockContent
-                .overlay { editHandles }
-                .contentShape(Rectangle())
-                .onTapGesture { showEditToolbar = false }
-                .gesture(
-                    DragGesture(minimumDistance: 4)
-                        .onChanged { handleDragChanged($0) }
-                        .onEnded { handleDragEnded($0) }
-                )
-                .offset(x: xPos, y: visualY)
+            blockWithHandles
+                .offset(x: xPos - handleInset, y: visualY - handleInset)
 
             // Toolbar
-            if showEditToolbar {
+            if showEditToolbar && activeDrag == .none {
                 toolbar
                     .position(x: toolbarX, y: toolbarYPos)
             }
 
             // Tooltip during resize
             if let tooltipTime, activeDrag == .resizeTop || activeDrag == .resizeBottom {
-                Text(tooltipTime)
-                    .font(.system(size: 11, design: .monospaced))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .position(x: xPos + frameWidth + 40, y: tooltipY)
+                tooltipView(time: tooltipTime)
             }
         }
+        .frame(width: containerWidth, height: totalTimelineHeight, alignment: .topLeading)
+        .transaction { $0.animation = nil }
+    }
+
+    // MARK: - Editable Block
+
+    private var blockWithHandles: some View {
+        ZStack(alignment: .topLeading) {
+            moveBlock
+            topResizeHandle
+            bottomResizeHandle
+        }
+        .frame(
+            width: frameWidth + handleHitSize,
+            height: clampedFrameH + handleHitSize,
+            alignment: .topLeading
+        )
+    }
+
+    private var moveBlock: some View {
+        blockContent
+            .offset(x: handleInset, y: handleInset)
+            .contentShape(Rectangle())
+            .highPriorityGesture(moveGesture)
+            .onTapGesture { showEditToolbar = false }
     }
 
     // MARK: - Block Content
@@ -99,8 +118,8 @@ struct EditableEventBlock: View {
                 Text(item.title)
                     .font(.system(size: 11, weight: .medium))
                     .strikethrough(item.isCompleted)
-                    .lineLimit(frameH < 30 ? 1 : 2)
-                if frameH >= 40, let start = item.startDate {
+                    .lineLimit(clampedFrameH < 30 ? 1 : 2)
+                if clampedFrameH >= 40, let start = item.startDate {
                     Text(timeFormatter.string(from: start))
                         .font(.system(size: 9))
                         .opacity(0.8)
@@ -110,32 +129,90 @@ struct EditableEventBlock: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
-        .frame(width: frameWidth, height: frameH, alignment: .topLeading)
+        .frame(width: frameWidth, height: clampedFrameH, alignment: .topLeading)
         .background(bgColor.opacity(item.isCompleted ? 0.4 : 0.85))
         .foregroundStyle(.white)
         .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
-    // MARK: - Handles (visual only)
+    // MARK: - Handles
 
-    private var editHandles: some View {
+    private var topResizeHandle: some View {
+        handleView(x: handleInset + frameWidth, y: handleInset)
+            .highPriorityGesture(topResizeGesture)
+    }
+
+    private var bottomResizeHandle: some View {
+        handleView(x: handleInset, y: handleInset + clampedFrameH)
+            .highPriorityGesture(bottomResizeGesture)
+    }
+
+    private func handleView(x: CGFloat, y: CGFloat) -> some View {
         ZStack {
-            Circle().fill(.white).frame(width: 8, height: 8).shadow(radius: 2)
-                .position(x: frameWidth, y: 0)
-            Circle().fill(.white).frame(width: 8, height: 8).shadow(radius: 2)
-                .position(x: 0, y: frameH)
+            Circle()
+                .fill(Color.clear)
+                .frame(width: handleHitSize, height: handleHitSize)
+            Circle()
+                .fill(.white)
+                .frame(width: handleSize, height: handleSize)
+                .shadow(radius: 2)
         }
-        .allowsHitTesting(false)
+        .contentShape(Circle())
+        .position(x: x, y: y)
+    }
+
+    // MARK: - Drag Gestures
+
+    private var moveGesture: some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
+            .onChanged { value in
+                handleDragChanged(value, dragType: .move)
+            }
+            .onEnded { value in
+                handleDragEnded(value, dragType: .move)
+            }
+    }
+
+    private var topResizeGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .global)
+            .onChanged { value in
+                handleDragChanged(value, dragType: .resizeTop)
+            }
+            .onEnded { value in
+                handleDragEnded(value, dragType: .resizeTop)
+            }
+    }
+
+    private var bottomResizeGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .global)
+            .onChanged { value in
+                handleDragChanged(value, dragType: .resizeBottom)
+            }
+            .onEnded { value in
+                handleDragEnded(value, dragType: .resizeBottom)
+            }
+    }
+
+    // MARK: - Tooltip
+
+    private func tooltipView(time: String) -> some View {
+        Text(time)
+            .font(.system(size: 11, design: .monospaced))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .position(x: xPos + frameWidth + 40, y: tooltipY)
     }
 
     // MARK: - Toolbar
 
     private var toolbarX: CGFloat { xPos + frameWidth / 2 }
     private var toolbarYPos: CGFloat {
-        let blockBottom = visualY + visualHeight
+        let blockBottom = baseYPos + baseHeight
         let toolbarH: CGFloat = 44
         let showBelow = blockBottom + 8 + toolbarH < totalTimelineHeight
-        return showBelow ? blockBottom + 8 + toolbarH / 2 : visualY - 8 - toolbarH / 2
+        return showBelow ? blockBottom + 8 + toolbarH / 2 : baseYPos - 8 - toolbarH / 2
     }
 
     private var toolbar: some View {
@@ -171,58 +248,93 @@ struct EditableEventBlock: View {
 
     // MARK: - Drag Handling
 
-    private func handleDragChanged(_ value: DragGesture.Value) {
-        if crossDayDragTriggered { return }
-
+    private func handleDragChanged(_ value: DragGesture.Value, dragType: DragType) {
         if activeDrag == .none {
-            let start = value.startLocation
-            let distToTop = hypot(start.x - frameWidth, start.y)
-            let distToBottom = hypot(start.x, start.y - frameH)
-            if distToTop < 24 {
-                activeDrag = .resizeTop
-            } else if distToBottom < 24 {
-                activeDrag = .resizeBottom
-            } else {
-                activeDrag = .move
+            activeDrag = dragType
+            isEditingGestureActive = true
+            showEditToolbar = false
+        }
+
+        // Edge hover detection for cross-day move
+        if dragType == .move {
+            let fingerScreenX = value.location.x
+            let edgeZone: CGFloat = 44
+            if fingerScreenX < edgeZone {
+                edgeDirection = .leading
+                onEdgeHover?(item, .leading)
+            } else if fingerScreenX > containerWidth - edgeZone {
+                edgeDirection = .trailing
+                onEdgeHover?(item, .trailing)
+            } else if edgeDirection != nil {
+                edgeDirection = nil
+                onEdgeClear?()
             }
         }
 
-        // Cross-day drag detection: horizontal > 60px in move mode
-        if activeDrag == .move && abs(value.translation.width) > 60 {
-            crossDayDragTriggered = true
-            onCrossDayDragStart?(item, value.translation.width)
-            activeDrag = .none
-            dragOffset = 0
-            return
+        // Snap to 15-minute grid
+        let qh = hourHeight / 4
+        let snapped = round(value.translation.height / qh) * qh
+
+        // Clamp: prevent resizing below 30 minutes
+        switch dragType {
+        case .resizeTop:
+            let maxOffset = baseHeight - (hourHeight / 2) // 30 min minimum
+            dragOffset = min(snapped, maxOffset)
+        case .resizeBottom:
+            let minOffset = -(baseHeight - (hourHeight / 2))
+            dragOffset = max(snapped, minOffset)
+        case .move:
+            // Clamp to timeline bounds
+            let minY = -baseYPos
+            let maxY = totalTimelineHeight - baseYPos - baseHeight
+            dragOffset = max(minY, min(snapped, maxY))
+        case .none:
+            break
         }
 
-        dragOffset = value.translation.height
+        // Update tooltip
+        updateTooltip()
+    }
+
+    private func updateTooltip() {
+        let qh = hourHeight / 4
+        let minutesDelta = Int(dragOffset / qh) * 15
 
         if activeDrag == .resizeTop, let startDate = item.startDate {
-            let minutesDelta = Int(round(value.translation.height / (hourHeight / 4))) * 15
-            if let newStart = Calendar.current.date(byAdding: .minute, value: minutesDelta, to: startDate) {
-                tooltipTime = timeFormatter.string(from: snapToQuarterHour(newStart))
-                tooltipY = baseYPos + dragOffset
+            if let newTime = Calendar.current.date(byAdding: .minute, value: minutesDelta, to: startDate) {
+                tooltipTime = timeFormatter.string(from: newTime)
+                tooltipY = visualY
             }
         } else if activeDrag == .resizeBottom, let endDate = item.endDate {
-            let minutesDelta = Int(round(value.translation.height / (hourHeight / 4))) * 15
-            if let newEnd = Calendar.current.date(byAdding: .minute, value: minutesDelta, to: endDate) {
-                tooltipTime = timeFormatter.string(from: snapToQuarterHour(newEnd))
-                tooltipY = baseYPos + baseHeight + dragOffset
+            if let newTime = Calendar.current.date(byAdding: .minute, value: minutesDelta, to: endDate) {
+                tooltipTime = timeFormatter.string(from: newTime)
+                tooltipY = baseYPos + visualHeight
             }
         }
     }
 
-    private func handleDragEnded(_ value: DragGesture.Value) {
-        crossDayDragTriggered = false
-        let calendar = Calendar.current
+    private func handleDragEnded(_ value: DragGesture.Value, dragType: DragType) {
+        defer {
+            if edgeDirection != nil {
+                edgeDirection = nil
+                onEdgeClear?()
+            }
+            activeDrag = .none
+            isEditingGestureActive = false
+            dragOffset = 0
+            tooltipTime = nil
+        }
 
-        switch activeDrag {
+        let calendar = Calendar.current
+        let qh = hourHeight / 4
+        let minutesDelta = Int(dragOffset / qh) * 15
+
+        guard minutesDelta != 0 else { return }
+
+        switch dragType {
         case .resizeTop:
             if let start = item.startDate, let end = item.endDate {
-                let minutesDelta = Int(round(value.translation.height / (hourHeight / 4))) * 15
                 if var newStart = calendar.date(byAdding: .minute, value: minutesDelta, to: start) {
-                    newStart = snapToQuarterHour(newStart)
                     let maxStart = calendar.date(byAdding: .minute, value: -30, to: end)!
                     if newStart > maxStart { newStart = maxStart }
                     onResizeItem(item.id, newStart, end)
@@ -230,9 +342,7 @@ struct EditableEventBlock: View {
             }
         case .resizeBottom:
             if let start = item.startDate, let end = item.endDate {
-                let minutesDelta = Int(round(value.translation.height / (hourHeight / 4))) * 15
                 if var newEnd = calendar.date(byAdding: .minute, value: minutesDelta, to: end) {
-                    newEnd = snapToQuarterHour(newEnd)
                     let minEnd = calendar.date(byAdding: .minute, value: 30, to: start)!
                     if newEnd < minEnd { newEnd = minEnd }
                     onResizeItem(item.id, start, newEnd)
@@ -240,10 +350,8 @@ struct EditableEventBlock: View {
             }
         case .move:
             if let start = item.startDate, let end = item.endDate {
-                let minutesDelta = Int(round(value.translation.height / (hourHeight / 4))) * 15
                 let duration = end.timeIntervalSince(start)
-                if var newStart = calendar.date(byAdding: .minute, value: minutesDelta, to: start) {
-                    newStart = snapToQuarterHour(newStart)
+                if let newStart = calendar.date(byAdding: .minute, value: minutesDelta, to: start) {
                     let newEnd = newStart.addingTimeInterval(duration)
                     onMoveItem(item.id, newStart, newEnd)
                 }
@@ -251,19 +359,5 @@ struct EditableEventBlock: View {
         case .none:
             break
         }
-
-        activeDrag = .none
-        dragOffset = 0
-        tooltipTime = nil
-    }
-
-    // MARK: - Helpers
-
-    private func snapToQuarterHour(_ date: Date) -> Date {
-        let calendar = Calendar.current
-        let minute = calendar.component(.minute, from: date)
-        let snapped = Int(round(Double(minute) / 15.0)) * 15
-        let delta = snapped - minute
-        return calendar.date(byAdding: .minute, value: delta, to: date) ?? date
     }
 }

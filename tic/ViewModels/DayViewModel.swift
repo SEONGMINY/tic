@@ -44,9 +44,13 @@ class DayViewModel {
     }
 
     func computeLayout(containerWidth: CGFloat) -> [String: LayoutAttributes] {
-        guard !timedItems.isEmpty else { return [:] }
+        computeLayout(for: timedItems, containerWidth: containerWidth)
+    }
 
-        let sorted = timedItems.sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
+    func computeLayout(for items: [TicItem], containerWidth: CGFloat) -> [String: LayoutAttributes] {
+        guard !items.isEmpty else { return [:] }
+
+        let sorted = items.sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
 
         // Group into collision clusters
         var clusters: [[TicItem]] = []
