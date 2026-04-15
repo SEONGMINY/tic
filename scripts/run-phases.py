@@ -30,6 +30,13 @@ KST = timezone(timedelta(hours=9))
 COMMIT_MSG_TEMPLATE = "feat({task_name}): phase {phase_num} — {phase_name}"
 RUNNER_COMMIT_MSG_TEMPLATE = "chore({task_name}): phase {phase_num} output + timestamps"
 SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+RUNNER_LABEL = "Claude"
+RUNNER_CMD = [
+    "claude",
+    "-p",
+    "--dangerously-skip-permissions",
+    "--output-format", "json",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +146,9 @@ def get_last_phase(index: dict) -> Optional[dict]:
 
 def get_task_dir() -> Path:
     if len(sys.argv) < 2:
-        print("Usage: python3 run-phases.py <task-dir>")
-        print("Example: python3 run-phases.py 0-mvp")
+        script_name = Path(sys.argv[0]).name
+        print(f"Usage: python3 {script_name} <task-dir>")
+        print(f"Example: python3 {script_name} 0-mvp")
         sys.exit(1)
     task_dir = TASKS_DIR / sys.argv[1]
     if not task_dir.is_dir():
@@ -184,16 +192,16 @@ def git_commit_docs(task_name: str, gh_env: dict[str, str]):
 
 
 def git_commit_phase(task_name: str, task_dir_name: str, phase_num: int, phase_name: str, gh_env: dict[str, str]) -> bool:
-    """Two-step commit: Claude fallback (if needed) + runner housekeeping."""
+    """Two-step commit: runner fallback (if needed) + runner housekeeping."""
     output_file = f"tasks/{task_dir_name}/phase{phase_num}-output.json"
     index_file = f"tasks/{task_dir_name}/index.json"
     top_index = "tasks/index.json"
 
     commit_env = gh_env if gh_env else None
 
-    # --- Step 1: Claude fallback commit (code changes Claude didn't commit) ---
+    # --- Step 1: runner fallback commit (code changes agent didn't commit) ---
     git_run("add", "-A")
-    # Unstage runner-generated files so they don't mix into Claude's commit
+    # Unstage runner-generated files so they don't mix into the agent's commit
     git_run("reset", "HEAD", "--", output_file)
     # index.json and top index may have runner timestamp updates — unstage too
     git_run("reset", "HEAD", "--", index_file)
@@ -290,13 +298,7 @@ def run_phase(task_dir: Path, phase: dict, preamble: str, gh_env: dict[str, str]
 
     output_file = task_dir / f"phase{phase_num}-output.json"
 
-    cmd = [
-        "claude",
-        "-p",
-        "--dangerously-skip-permissions",
-        "--output-format", "json",
-        full_prompt,
-    ]
+    cmd = [*RUNNER_CMD, full_prompt]
 
     result = subprocess.run(
         cmd,
@@ -319,7 +321,7 @@ def run_phase(task_dir: Path, phase: dict, preamble: str, gh_env: dict[str, str]
         json.dump(output_data, f, indent=2, ensure_ascii=False)
 
     if result.returncode != 0:
-        print(f"\n  WARN: Claude exited with code {result.returncode}")
+        print(f"\n  WARN: {RUNNER_LABEL} exited with code {result.returncode}")
         print(f"  stderr: {result.stderr[:500]}")
 
     return output_data
@@ -376,7 +378,7 @@ def main():
 
     # --- Header ---
     print(f"\n{'='*60}")
-    print(f"  hase Runner")
+    print(f"  {RUNNER_LABEL} Phase Runner")
     print(
         f"  Task: {task_name} | Phases: {total_phases} | Pending: {pending_count}")
     if gh_user:
@@ -440,7 +442,7 @@ def main():
             run_phase(task_dir, phase, preamble, gh_env)
             elapsed = int(sp.elapsed)
 
-        # Re-read index.json to check what Claude did
+        # Re-read index.json to check what the agent did
         fresh_index = load_index(index_file)
         status = None
         for p in fresh_index["phases"]:
@@ -489,12 +491,12 @@ def main():
         elif status == "pending":
             print(
                 f"  ✗ Phase {phase_num}: {phase_name} — status still 'pending' after execution")
-            print("    Claude did not update index.json. Marking as error.")
+            print(f"    {RUNNER_LABEL} did not update index.json. Marking as error.")
 
             for p in fresh_index["phases"]:
                 if p["phase"] == phase_num:
                     p["status"] = "error"
-                    p["error_message"] = "Claude did not update index.json status"
+                    p["error_message"] = f"{RUNNER_LABEL} did not update index.json status"
                     p["failed_at"] = ts_end
                     break
             save_index(index_file, fresh_index)
