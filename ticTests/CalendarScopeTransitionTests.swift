@@ -57,6 +57,27 @@ final class CalendarScopeTransitionTests: XCTestCase {
         XCTAssertEqual(nextState?.selectedDate, selectedDate.startOfDay)
     }
 
+    func testGlobalDropReturnsCommittedDateInDayScope() {
+        let droppedStart = Calendar.current.date(
+            from: DateComponents(year: 2026, month: 5, day: 2, hour: 9, minute: 15)
+        )!
+        let droppedEnd = Calendar.current.date(
+            from: DateComponents(year: 2026, month: 5, day: 2, hour: 10, minute: 15)
+        )!
+        let commit = DragSessionCommit(
+            itemId: "event-1",
+            start: droppedStart,
+            end: droppedEnd
+        )
+
+        let nextState = CalendarScopeTransition.stateAfterGlobalDrop(commit: commit)
+
+        XCTAssertEqual(nextState.scope, .day)
+        XCTAssertEqual(nextState.selectedDate, droppedStart.startOfDay)
+        XCTAssertEqual(nextState.displayedMonth, droppedStart.startOfMonth)
+        XCTAssertEqual(nextState.displayedYear, droppedStart.year)
+    }
+
     func testActiveDragSessionRemainsVisibleAcrossScopeChanges() {
         let coordinator = CalendarDragCoordinator()
         let item = makeItem()

@@ -35,6 +35,21 @@ enum DragDropOwner: Equatable {
     }
 }
 
+enum DragSessionTermination: Equatable {
+    case committed
+    case cancelled
+    case invalidDropRestored
+
+    var clearsEditingState: Bool {
+        switch self {
+        case .committed:
+            return false
+        case .cancelled, .invalidDropRestored:
+            return true
+        }
+    }
+}
+
 @Observable
 final class CalendarDragCoordinator {
     private(set) var engine: DragSessionEngine
@@ -42,6 +57,8 @@ final class CalendarDragCoordinator {
     private(set) var placeholderItemId: String?
     private(set) var displayedOverlayFrameGlobal: CGRect?
     private(set) var dropOwner: DragDropOwner = .localDayTimeline
+    private(set) var lastSessionTermination: DragSessionTermination?
+    private(set) var sessionTerminationCount = 0
 
     private var rootFrameGlobal: CGRect = .zero
     private var timelineLayout: DragTimelineLayout?
@@ -104,6 +121,10 @@ final class CalendarDragCoordinator {
             in: snapshot.currentScope,
             hasActiveSession: draggedItem != nil
         )
+    }
+
+    var hasActiveSession: Bool {
+        draggedItem != nil || snapshot.source != nil
     }
 
     func updateRootFrame(_ frameGlobal: CGRect) {
@@ -282,7 +303,7 @@ final class CalendarDragCoordinator {
                 start: absoluteDates.start,
                 end: absoluteDates.end
             )
-            resetSession()
+            finishSession(.committed)
             return commit
         }
 
@@ -303,7 +324,7 @@ final class CalendarDragCoordinator {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.engine.finishRestore()
-            self.resetSession()
+            self.finishSession(self.terminationForRestoredSession())
         }
         restoreCleanupWorkItem = workItem
         DispatchQueue.main.asyncAfter(
@@ -312,12 +333,31 @@ final class CalendarDragCoordinator {
         )
     }
 
+    private func finishSession(_ termination: DragSessionTermination) {
+        lastSessionTermination = termination
+        sessionTerminationCount += 1
+        resetSession()
+    }
+
+    private func terminationForRestoredSession() -> DragSessionTermination {
+        switch engine.snapshot.invalidReason {
+        case .invalidDrop:
+            return .invalidDropRestored
+        case .cancelledByEvent, .falseStartPreLongPress, nil:
+            return .cancelled
+        }
+    }
+
     private func resetSession() {
+        restoreCleanupWorkItem?.cancel()
+        restoreCleanupWorkItem = nil
         engine = DragSessionEngine(params: engine.params)
         draggedItem = nil
         placeholderItemId = nil
         displayedOverlayFrameGlobal = nil
         dropOwner = .localDayTimeline
+        calendarFramesByScope[.month] = nil
+        calendarFramesByScope[.year] = nil
     }
 
     private func syncDisplayedOverlayFrame() {

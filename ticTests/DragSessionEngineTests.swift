@@ -44,7 +44,7 @@ final class DragSessionEngineTests: XCTestCase {
         XCTAssertEqual(engine.snapshot.invalidReason, .falseStartPreLongPress)
     }
 
-    func testInvalidCalendarDropRestores() {
+    func testInvalidCalendarDropRestoresAndFinishesIdle() {
         var engine = DragSessionEngine()
         let source = makeSource()
 
@@ -63,6 +63,12 @@ final class DragSessionEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.outcome, .cancelled)
         XCTAssertEqual(snapshot.invalidReason, .invalidDrop)
         XCTAssertFalse(snapshot.droppable)
+
+        engine.finishRestore()
+
+        XCTAssertEqual(engine.snapshot.state, .idle)
+        XCTAssertEqual(engine.snapshot.outcome, .cancelled)
+        XCTAssertEqual(engine.snapshot.invalidReason, .invalidDrop)
     }
 
     func testCalendarDropNeedsActiveDate() {
@@ -146,6 +152,7 @@ final class DragSessionEngineTests: XCTestCase {
         XCTAssertEqual(engine.snapshot.state, .idle)
         XCTAssertEqual(engine.snapshot.outcome, .cancelled)
         XCTAssertEqual(engine.snapshot.invalidReason, .cancelledByEvent)
+        XCTAssertNil(engine.snapshot.finalDropResult)
     }
 
     private func makeSource() -> DragSessionSource {

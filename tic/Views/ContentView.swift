@@ -92,6 +92,8 @@ struct ContentView: View {
             if newPhase == .active {
                 // 포그라운드 복귀 시 Live Activity 체크
                 Task { await checkLiveActivity() }
+            } else if dragCoordinator.hasActiveSession {
+                dragCoordinator.cancelDrag()
             }
         }
         .onReceive(liveActivityTimer) { _ in
@@ -309,12 +311,10 @@ struct ContentView: View {
     ) {
         do {
             try eventKitService.moveToDate(item, newStart: commit.start, newEnd: commit.end)
+            let nextState = CalendarScopeTransition.stateAfterGlobalDrop(commit: commit)
 
             withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
-                viewModel.selectedDate = commit.start.startOfDay
-                if viewModel.scope != .day {
-                    viewModel.scope = .day
-                }
+                viewModel.applyScopeTransitionState(nextState)
             }
         } catch {
             eventKitService.lastChangeDate = Date()

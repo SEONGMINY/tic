@@ -176,6 +176,9 @@ struct DayView: View {
                 await refreshDayItems()
             }
         }
+        .onChange(of: dragCoordinator.sessionTerminationCount) { _, _ in
+            handleSessionTermination()
+        }
         .sheet(isPresented: $showActionSheet) {
             ActionListSheet(
                 nextAction: viewModel.selectedDate.isToday ? dayViewModel.nextAction : nil,
@@ -423,6 +426,17 @@ struct DayView: View {
             updatedItem.endDate == pendingEditingDates.end {
             self.pendingEditingDates = nil
         }
+    }
+
+    private func handleSessionTermination() {
+        guard let termination = dragCoordinator.lastSessionTermination,
+              termination.clearsEditingState else {
+            return
+        }
+
+        editingItemId = nil
+        showEditToolbar = false
+        isEditingGestureActive = false
     }
 
     // MARK: - Helpers

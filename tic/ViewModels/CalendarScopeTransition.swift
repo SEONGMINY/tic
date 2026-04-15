@@ -25,6 +25,16 @@ struct CalendarScopeTransitionState: Equatable {
 }
 
 enum CalendarScopeTransition {
+    static func stateAfterGlobalDrop(commit: DragSessionCommit) -> CalendarScopeTransitionState {
+        let droppedDate = commit.start.startOfDay
+        return CalendarScopeTransitionState(
+            scope: .day,
+            selectedDate: droppedDate,
+            displayedMonth: droppedDate.startOfMonth,
+            displayedYear: droppedDate.year
+        )
+    }
+
     static func nextState(
         from state: CalendarScopeTransitionState,
         pinch direction: CalendarScopePinchDirection,
