@@ -9,19 +9,45 @@ struct DragSessionCommit {
     let end: Date
 }
 
+enum DragDropOwner: Equatable {
+    case localDayTimeline
+    case rootCoordinator
+
+    static func nextOwner(
+        afterShowing scope: DragSessionScope,
+        currentOwner: DragDropOwner
+    ) -> DragDropOwner {
+        if currentOwner == .rootCoordinator || scope != .day {
+            return .rootCoordinator
+        }
+        return .localDayTimeline
+    }
+
+    func handlesGlobalDrop(hasActiveSession: Bool) -> Bool {
+        hasActiveSession && self == .rootCoordinator
+    }
+
+    func handlesLocalDrop(
+        in scope: DragSessionScope,
+        hasActiveSession: Bool
+    ) -> Bool {
+        hasActiveSession && self == .localDayTimeline && scope == .day
+    }
+}
+
 @Observable
 final class CalendarDragCoordinator {
     private(set) var engine: DragSessionEngine
     private(set) var draggedItem: TicItem?
     private(set) var placeholderItemId: String?
     private(set) var displayedOverlayFrameGlobal: CGRect?
+    private(set) var dropOwner: DragDropOwner = .localDayTimeline
 
     private var rootFrameGlobal: CGRect = .zero
     private var timelineLayout: DragTimelineLayout?
     private var visibleDayDate: Date = .now.startOfDay
     private var calendarFramesByScope: [DragSessionScope: [DateCellFrame]] = [:]
     private var restoreCleanupWorkItem: DispatchWorkItem?
-    private var rootOwnedSession = false
 
     init(params: DragSessionParams = .baseline) {
         self.engine = DragSessionEngine(params: params)
@@ -70,11 +96,14 @@ final class CalendarDragCoordinator {
     }
 
     var shouldHandleDragGlobally: Bool {
-        rootOwnedSession && draggedItem != nil
+        dropOwner.handlesGlobalDrop(hasActiveSession: draggedItem != nil)
     }
 
     var shouldHandleDropLocally: Bool {
-        rootOwnedSession == false
+        dropOwner.handlesLocalDrop(
+            in: snapshot.currentScope,
+            hasActiveSession: draggedItem != nil
+        )
     }
 
     func updateRootFrame(_ frameGlobal: CGRect) {
@@ -85,9 +114,10 @@ final class CalendarDragCoordinator {
         let dragScope = map(scope)
         guard engine.snapshot.source != nil else { return }
 
-        if dragScope != .day {
-            rootOwnedSession = true
-        }
+        dropOwner = DragDropOwner.nextOwner(
+            afterShowing: dragScope,
+            currentOwner: dropOwner
+        )
 
         engine.updateScope(
             dragScope,
@@ -188,7 +218,7 @@ final class CalendarDragCoordinator {
 
         draggedItem = item
         placeholderItemId = item.id
-        rootOwnedSession = false
+        dropOwner = .localDayTimeline
         syncDisplayedOverlayFrame()
     }
 
@@ -213,7 +243,30 @@ final class CalendarDragCoordinator {
         syncDisplayedOverlayFrame()
     }
 
-    func dropDayDrag() -> DragSessionCommit? {
+    func completeLocalDrag() -> DragSessionCommit? {
+        guard shouldHandleDropLocally else { return nil }
+        return completeActiveDrag()
+    }
+
+    func completeGlobalDrag() -> DragSessionCommit? {
+        guard shouldHandleDragGlobally else { return nil }
+        return completeActiveDrag()
+    }
+
+    func cancelDrag() {
+        let snapshot = engine.cancel(timestampMs: nowTimestampMs())
+        syncDisplayedOverlayFrame()
+        if snapshot.state == .restoring {
+            scheduleRestoreCleanup()
+        }
+    }
+
+    func isShowingPlaceholder(for itemId: String?) -> Bool {
+        guard let itemId else { return false }
+        return placeholderItemId == itemId
+    }
+
+    private func completeActiveDrag() -> DragSessionCommit? {
         guard let draggedItem else { return nil }
         if engine.snapshot.state == .pressing || engine.snapshot.state == .dragReady {
             cancelDrag()
@@ -237,24 +290,6 @@ final class CalendarDragCoordinator {
             scheduleRestoreCleanup()
         }
         return nil
-    }
-
-    func completeGlobalDrag() -> DragSessionCommit? {
-        guard shouldHandleDragGlobally else { return nil }
-        return dropDayDrag()
-    }
-
-    func cancelDrag() {
-        let snapshot = engine.cancel(timestampMs: nowTimestampMs())
-        syncDisplayedOverlayFrame()
-        if snapshot.state == .restoring {
-            scheduleRestoreCleanup()
-        }
-    }
-
-    func isShowingPlaceholder(for itemId: String?) -> Bool {
-        guard let itemId else { return false }
-        return placeholderItemId == itemId
     }
 
     private func scheduleRestoreCleanup() {
@@ -282,7 +317,7 @@ final class CalendarDragCoordinator {
         draggedItem = nil
         placeholderItemId = nil
         displayedOverlayFrameGlobal = nil
-        rootOwnedSession = false
+        dropOwner = .localDayTimeline
     }
 
     private func syncDisplayedOverlayFrame() {

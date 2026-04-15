@@ -34,12 +34,6 @@ struct DayView: View {
     @State private var isEditingGestureActive: Bool = false
     @State private var pendingEditingDates: PendingEditingDates?
 
-    // Edge hover state (cross-day)
-    @State private var edgeHoverDirection: Edge?
-    @State private var edgeHoverItemId: String?
-    @State private var edgeHoverTimer: Timer?
-    @State private var edgeHoverProgress: CGFloat = 0
-
     @Namespace private var dayAnimation
 
     private let weekdays = ["일", "월", "화", "수", "목", "금", "토"]
@@ -111,13 +105,7 @@ struct DayView: View {
             isEditingGestureActive: $isEditingGestureActive,
             onResizeItem: commitMovedItem,
             onMoveItem: commitMovedItem,
-            onDuplicateItem: handleDuplicate,
-            onEdgeHover: { item, direction in
-                startEdgeHover(item: item, direction: direction)
-            },
-            onEdgeClear: {
-                cancelEdgeHover()
-            }
+            onDuplicateItem: handleDuplicate
         )
     }
 
@@ -171,9 +159,6 @@ struct DayView: View {
                 if showFAB {
                     fabButton
                 }
-            }
-            .overlay {
-                edgeHoverIndicator
             }
         }
         .task {
@@ -423,90 +408,6 @@ struct DayView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Edge Hover (Cross-Day Move)
-
-    private func startEdgeHover(item: TicItem, direction: Edge) {
-        if edgeHoverTimer != nil, edgeHoverItemId == item.id, edgeHoverDirection == direction {
-            return
-        }
-
-        cancelEdgeHover()
-        edgeHoverItemId = item.id
-        edgeHoverDirection = direction
-        edgeHoverProgress = 0
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-
-        // Animate progress bar over 1 second
-        withAnimation(.linear(duration: 1.0)) {
-            edgeHoverProgress = 1.0
-        }
-
-        // After 1 second: perform transition
-        edgeHoverTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [self] _ in
-            DispatchQueue.main.async {
-                performEdgeTransition()
-            }
-        }
-    }
-
-    private func cancelEdgeHover() {
-        edgeHoverTimer?.invalidate()
-        edgeHoverTimer = nil
-        edgeHoverItemId = nil
-        withAnimation(.easeOut(duration: 0.15)) {
-            edgeHoverDirection = nil
-            edgeHoverProgress = 0
-        }
-    }
-
-    private func performEdgeTransition() {
-        guard let itemId = edgeHoverItemId,
-              let direction = edgeHoverDirection,
-              let item = currentEditingItem(for: itemId),
-              let start = item.startDate,
-              let end = item.endDate else {
-            cancelEdgeHover()
-            return
-        }
-
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-
-        let dayDelta = direction == .leading ? -1 : 1
-        let newDate = viewModel.selectedDate.adding(days: dayDelta)
-
-        // Move item to new date at same time
-        let calendar = Calendar.current
-        let duration = end.timeIntervalSince(start)
-        var components = calendar.dateComponents([.year, .month, .day], from: newDate)
-        components.hour = calendar.component(.hour, from: start)
-        components.minute = calendar.component(.minute, from: start)
-
-        if let newStart = calendar.date(from: components) {
-            let newEnd = newStart.addingTimeInterval(duration)
-            do {
-                try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
-                pendingEditingDates = PendingEditingDates(
-                    itemId: item.id,
-                    item: item,
-                    start: newStart,
-                    end: newEnd
-                )
-            } catch {
-                cancelEdgeHover()
-                return
-            }
-        }
-
-        // Navigate to new date
-        slideDirection = direction == .leading ? .leading : .trailing
-        withAnimation(.easeInOut(duration: 0.25)) {
-            viewModel.selectedDate = newDate
-        }
-
-        showEditToolbar = false
-        cancelEdgeHover()
-    }
-
     private func refreshDayItems() async {
         await dayViewModel.loadItems(for: viewModel.selectedDate, service: eventKitService)
         resolvePendingEditingDates()
@@ -522,84 +423,6 @@ struct DayView: View {
             updatedItem.endDate == pendingEditingDates.end {
             self.pendingEditingDates = nil
         }
-    }
-
-    private func currentEditingItem(for itemId: String) -> TicItem? {
-        if let pendingEditingDates, pendingEditingDates.itemId == itemId {
-            return pendingEditingDates.item.updatingDates(
-                startDate: pendingEditingDates.start,
-                endDate: pendingEditingDates.end
-            )
-        }
-
-        return dayViewModel.timedItems.first(where: { $0.id == itemId })
-    }
-
-    @ViewBuilder
-    private var edgeHoverIndicator: some View {
-        if let direction = edgeHoverDirection {
-            let isLeading = direction == .leading
-            let targetDate = viewModel.selectedDate.adding(days: isLeading ? -1 : 1)
-            let dateText = formatEdgeDate(targetDate)
-
-            HStack {
-                if !isLeading { Spacer() }
-
-                VStack(spacing: 6) {
-                    Spacer()
-                    HStack(spacing: 4) {
-                        if isLeading {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        Text(dateText)
-                            .font(.system(size: 12, weight: .semibold))
-                        if !isLeading {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background {
-                        Capsule()
-                            .fill(.orange)
-                            .overlay(alignment: .bottom) {
-                                // Progress bar
-                                GeometryReader { geo in
-                                    Capsule()
-                                        .fill(.white.opacity(0.3))
-                                        .frame(width: geo.size.width * edgeHoverProgress, height: 3)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                                }
-                            }
-                            .clipShape(Capsule())
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 4)
-                .frame(width: 44)
-                .background(
-                    LinearGradient(
-                        colors: [.orange.opacity(0.25), .clear],
-                        startPoint: isLeading ? .leading : .trailing,
-                        endPoint: isLeading ? .trailing : .leading
-                    )
-                )
-
-                if isLeading { Spacer() }
-            }
-            .allowsHitTesting(false)
-            .transition(.opacity)
-        }
-    }
-
-    private func formatEdgeDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ko_KR")
-        formatter.dateFormat = "M/d"
-        return formatter.string(from: date)
     }
 
     // MARK: - Helpers

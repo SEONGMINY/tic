@@ -26,11 +26,8 @@ struct EditableEventBlock: View {
     var onMoveGestureBegan: ((_ sourceFrameGlobal: CGRect, _ pointerGlobal: CGPoint) -> Void)?
     var onMoveGestureChanged: ((_ pointerGlobal: CGPoint) -> Void)?
     var onMoveGestureEnded: (() -> Void)?
-    var onEdgeHover: ((_ item: TicItem, _ direction: Edge) -> Void)?
-    var onEdgeClear: (() -> Void)?
 
     @State private var activeDrag: DragType = .none
-    @State private var edgeDirection: Edge?
     @State private var dragOffset: CGFloat = 0
     @State private var tooltipTime: String?
     @State private var tooltipY: CGFloat = 0
@@ -271,22 +268,6 @@ struct EditableEventBlock: View {
             return
         }
 
-        // Edge hover detection for cross-day move
-        if dragType == .move {
-            let fingerScreenX = value.location.x
-            let edgeZone: CGFloat = 44
-            if fingerScreenX < edgeZone {
-                edgeDirection = .leading
-                onEdgeHover?(item, .leading)
-            } else if fingerScreenX > containerWidth - edgeZone {
-                edgeDirection = .trailing
-                onEdgeHover?(item, .trailing)
-            } else if edgeDirection != nil {
-                edgeDirection = nil
-                onEdgeClear?()
-            }
-        }
-
         // Snap to 15-minute grid
         let qh = hourHeight / 4
         let snapped = round(value.translation.height / qh) * qh
@@ -331,10 +312,6 @@ struct EditableEventBlock: View {
 
     private func handleDragEnded(_ value: DragGesture.Value, dragType: DragType) {
         defer {
-            if edgeDirection != nil {
-                edgeDirection = nil
-                onEdgeClear?()
-            }
             activeDrag = .none
             isEditingGestureActive = false
             dragOffset = 0

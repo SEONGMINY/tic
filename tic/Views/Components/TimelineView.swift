@@ -40,8 +40,6 @@ struct TimelineView: View {
     var onResizeItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onMoveItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onDuplicateItem: (_ itemId: String) -> Void
-    var onEdgeHover: ((_ item: TicItem, _ direction: Edge) -> Void)?
-    var onEdgeClear: (() -> Void)?
 
     let hourHeight: CGFloat = 60
     private let timeColumnWidth: CGFloat = 52
@@ -160,15 +158,10 @@ struct TimelineView: View {
                                             dragCoordinator.updateDayDrag(pointerGlobal: pointerGlobal)
                                         },
                                         onMoveGestureEnded: {
-                                            guard dragCoordinator.shouldHandleDropLocally else {
-                                                return
-                                            }
-                                            if let commit = dragCoordinator.dropDayDrag() {
+                                            if let commit = dragCoordinator.completeLocalDrag() {
                                                 onMoveItem(item.id, commit.start, commit.end)
                                             }
-                                        },
-                                        onEdgeHover: onEdgeHover,
-                                        onEdgeClear: onEdgeClear
+                                        }
                                     )
                                 }
                             }
