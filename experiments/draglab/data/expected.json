@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "sessions": [
+    {
+      "sessionId": "s001",
+      "shouldStartDrag": true,
+      "expectedDragStartTsMs": 560,
+      "expectedStableHoverDates": [],
+      "shouldAcceptDrop": true,
+      "expectedResult": {
+        "date": "2026-04-16",
+        "startMinute": 600,
+        "endMinute": 660
+      },
+      "expectedOutcome": "dropped"
+    },
+    {
+      "sessionId": "s002",
+      "shouldStartDrag": true,
+      "expectedDragStartTsMs": 548,
+      "expectedStableHoverDates": [
+        { "date": "2026-04-20", "fromTsMs": 1040 }
+      ],
+      "shouldAcceptDrop": true,
+      "expectedResult": {
+        "date": "2026-04-20",
+        "startMinute": 600,
+        "endMinute": 660
+      },
+      "expectedOutcome": "dropped"
+    },
+    {
+      "sessionId": "s003",
+      "shouldStartDrag": false,
+      "expectedDragStartTsMs": null,
+      "expectedStableHoverDates": [],
+      "shouldAcceptDrop": false,
+      "expectedResult": null,
+      "expectedOutcome": "none"
+    },
+    {
+      "sessionId": "s004",
+      "shouldStartDrag": true,
+      "expectedDragStartTsMs": 550,
+      "expectedStableHoverDates": [],
+      "shouldAcceptDrop": false,
+      "expectedResult": null,
+      "expectedOutcome": "cancelled"
+    },
+    {
+      "sessionId": "s005",
+      "shouldStartDrag": true,
+      "expectedDragStartTsMs": 560,
+      "expectedStableHoverDates": [],
+      "shouldAcceptDrop": false,
+      "expectedResult": null,
+      "expectedOutcome": "cancelled"
+    },
+    {
+      "sessionId": "s006",
+      "shouldStartDrag": true,
+      "expectedDragStartTsMs": 550,
+      "expectedStableHoverDates": [],
+      "shouldAcceptDrop": false,
+      "expectedResult": null,
+      "expectedOutcome": "cancelled"
+    }
+  ]
+}

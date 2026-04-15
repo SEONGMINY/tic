@@ -15,3 +15,4 @@ xcuserdata/
 *.moved-aside
 *.xcscmblueprint
 .build/
+experiments/draglab/runs/*.jsonl

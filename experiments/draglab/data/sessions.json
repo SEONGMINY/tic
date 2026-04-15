@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "defaults": {
+    "snapStepMinute": 15,
+    "minimumDurationMinute": 30
+  },
+  "sessions": [
+    {
+      "sessionId": "s001",
+      "scenarioTags": ["positive", "same-day", "timeline"],
+      "timezone": "Asia/Seoul",
+      "initialScope": "day",
+      "device": {
+        "widthPt": 393,
+        "heightPt": 852,
+        "safeArea": { "top": 59, "left": 0, "right": 0, "bottom": 34 }
+      },
+      "item": {
+        "itemId": "evt_1",
+        "date": "2026-04-16",
+        "startMinute": 570,
+        "endMinute": 630,
+        "frameGlobal": { "x": 68, "y": 355, "width": 320, "height": 60 }
+      },
+      "layouts": {
+        "day": {
+          "timelineFrameGlobal": { "x": 0, "y": 140, "width": 393, "height": 678 },
+          "scrollOffsetY": 210,
+          "hourHeight": 60,
+          "timeColumnWidth": 52,
+          "eventAreaLeadingInset": 8
+        },
+        "month": {
+          "gridFrameGlobal": { "x": 16, "y": 186, "width": 361, "height": 300 },
+          "cells": [
+            { "date": "2026-04-16", "frameGlobal": { "x": 171, "y": 230, "width": 48, "height": 44 } },
+            { "date": "2026-04-17", "frameGlobal": { "x": 221, "y": 230, "width": 48, "height": 44 } },
+            { "date": "2026-04-18", "frameGlobal": { "x": 271, "y": 230, "width": 48, "height": 44 } }
+          ]
+        },
+        "year": {
+          "gridFrameGlobal": { "x": 16, "y": 118, "width": 361, "height": 590 },
+          "cells": [
+            { "date": "2026-04-16", "frameGlobal": { "x": 194, "y": 248, "width": 16, "height": 12 } },
+            { "date": "2026-04-17", "frameGlobal": { "x": 212, "y": 248, "width": 16, "height": 12 } }
+          ]
+        }
+      },
+      "split": "train"
+    },
+    {
+      "sessionId": "s002",
+      "scenarioTags": ["positive", "cross-scope", "month-hover"],
+      "timezone": "Asia/Seoul",
+      "initialScope": "day",
+      "device": {
+        "widthPt": 393,
+        "heightPt": 852,
+        "safeArea": { "top": 59, "left": 0, "right": 0, "bottom": 34 }
+      },
+      "item": {
+        "itemId": "evt_2",
+        "date": "2026-04-16",
+        "startMinute": 600,
+        "endMinute": 660,
+        "frameGlobal": { "x": 68, "y": 385, "width": 320, "height": 60 }
+      },
+      "layouts": {
+        "day": {
+          "timelineFrameGlobal": { "x": 0, "y": 140, "width": 393, "height": 678 },
+          "scrollOffsetY": 240,
+          "hourHeight": 60,
+          "timeColumnWidth": 52,
+          "eventAreaLeadingInset": 8
+        },
+        "month": {
+          "gridFrameGlobal": { "x": 16, "y": 186, "width": 361, "height": 300 },
+          "cells": [
+            { "date": "2026-04-18", "frameGlobal": { "x": 273, "y": 230, "width": 48, "height": 44 } },
+            { "date": "2026-04-19", "frameGlobal": { "x": 23, "y": 276, "width": 48, "height": 44 } },
+            { "date": "2026-04-20", "frameGlobal": { "x": 73, "y": 276, "width": 48, "height": 44 } }
+          ]
+        },
+        "year": {
+          "gridFrameGlobal": { "x": 16, "y": 118, "width": 361, "height": 590 },
+          "cells": [
+            { "date": "2026-04-19", "frameGlobal": { "x": 96, "y": 264, "width": 16, "height": 12 } },
+            { "date": "2026-04-20", "frameGlobal": { "x": 114, "y": 264, "width": 16, "height": 12 } }
+          ]
+        }
+      },
+      "split": "train"
+    },
+    {
+      "sessionId": "s003",
+      "scenarioTags": ["negative", "false-start"],
+      "timezone": "Asia/Seoul",
+      "initialScope": "day",
+      "device": {
+        "widthPt": 393,
+        "heightPt": 852,
+        "safeArea": { "top": 59, "left": 0, "right": 0, "bottom": 34 }
+      },
+      "item": {
+        "itemId": "evt_3",
+        "date": "2026-04-16",
+        "startMinute": 540,
+        "endMinute": 600,
+        "frameGlobal": { "x": 68, "y": 325, "width": 320, "height": 60 }
+      },
+      "layouts": {
+        "day": {
+          "timelineFrameGlobal": { "x": 0, "y": 140, "width": 393, "height": 678 },
+          "scrollOffsetY": 180,
+          "hourHeight": 60,
+          "timeColumnWidth": 52,
+          "eventAreaLeadingInset": 8
+        },
+        "month": {
+          "gridFrameGlobal": { "x": 16, "y": 186, "width": 361, "height": 300 },
+          "cells": [
+            { "date": "2026-04-16", "frameGlobal": { "x": 171, "y": 230, "width": 48, "height": 44 } }
+          ]
+        },
+        "year": {
+          "gridFrameGlobal": { "x": 16, "y": 118, "width": 361, "height": 590 },
+          "cells": [
+            { "date": "2026-04-16", "frameGlobal": { "x": 194, "y": 248, "width": 16, "height": 12 } }
+          ]
+        }
+      },
+      "split": "train"
+    },
+    {
+      "sessionId": "s004",
+      "scenarioTags": ["negative", "invalid-drop", "restore"],
+      "timezone": "Asia/Seoul",
+      "initialScope": "day",
+      "device": {
+        "widthPt": 393,
+        "heightPt": 852,
+        "safeArea": { "top": 59, "left": 0, "right": 0, "bottom": 34 }
+      },
+      "item": {
+        "itemId": "evt_4",
+        "date": "2026-04-16",
+        "startMinute": 675,
+        "endMinute": 735,
+        "frameGlobal": { "x": 68, "y": 460, "width": 320, "height": 60 }
+      },
+      "layouts": {
+        "day": {
+          "timelineFrameGlobal": { "x": 0, "y": 140, "width": 393, "height": 678 },
+          "scrollOffsetY": 315,
+          "hourHeight": 60,
+          "timeColumnWidth": 52,
+          "eventAreaLeadingInset": 8
+        },
+        "month": {
+          "gridFrameGlobal": { "x": 16, "y": 186, "width": 361, "height": 300 },
+          "cells": [
+            { "date": "2026-04-21", "frameGlobal": { "x": 123, "y": 276, "width": 48, "height": 44 } },
+            { "date": "2026-04-22", "frameGlobal": { "x": 173, "y": 276, "width": 48, "height": 44 } }
+          ]
+        },
+        "year": {
+          "gridFrameGlobal": { "x": 16, "y": 118, "width": 361, "height": 590 },
+          "cells": [
+            { "date": "2026-04-21", "frameGlobal": { "x": 132, "y": 264, "width": 16, "height": 12 } }
+          ]
+        }
+      },
+      "split": "dev"
+    },
+    {
+      "sessionId": "s005",
+      "scenarioTags": ["negative", "hover-unstable"],
+      "timezone": "Asia/Seoul",
+      "initialScope": "day",
+      "device": {
+        "widthPt": 393,
+        "heightPt": 852,
+        "safeArea": { "top": 59, "left": 0, "right": 0, "bottom": 34 }
+      },
+      "item": {
+        "itemId": "evt_5",
+        "date": "2026-04-16",
+        "startMinute": 750,
+        "endMinute": 810,
+        "frameGlobal": { "x": 68, "y": 535, "width": 320, "height": 60 }
+      },
+      "layouts": {
+        "day": {
+          "timelineFrameGlobal": { "x": 0, "y": 140, "width": 393, "height": 678 },
+          "scrollOffsetY": 390,
+          "hourHeight": 60,
+          "timeColumnWidth": 52,
+          "eventAreaLeadingInset": 8
+        },
+        "month": {
+          "gridFrameGlobal": { "x": 16, "y": 186, "width": 361, "height": 300 },
+          "cells": [
+            { "date": "2026-04-23", "frameGlobal": { "x": 223, "y": 276, "width": 48, "height": 44 } },
+            { "date": "2026-04-24", "frameGlobal": { "x": 273, "y": 276, "width": 48, "height": 44 } }
+          ]
+        },
+        "year": {
+          "gridFrameGlobal": { "x": 16, "y": 118, "width": 361, "height": 590 },
+          "cells": [
+            { "date": "2026-04-23", "frameGlobal": { "x": 168, "y": 264, "width": 16, "height": 12 } },
+            { "date": "2026-04-24", "frameGlobal": { "x": 186, "y": 264, "width": 16, "height": 12 } }
+          ]
+        }
+      },
+      "split": "dev"
+    },
+    {
+      "sessionId": "s006",
+      "scenarioTags": ["negative", "cancel", "year-scope"],
+      "timezone": "Asia/Seoul",
+      "initialScope": "day",
+      "device": {
+        "widthPt": 393,
+        "heightPt": 852,
+        "safeArea": { "top": 59, "left": 0, "right": 0, "bottom": 34 }
+      },
+      "item": {
+        "itemId": "evt_6",
+        "date": "2026-04-16",
+        "startMinute": 840,
+        "endMinute": 900,
+        "frameGlobal": { "x": 68, "y": 625, "width": 320, "height": 60 }
+      },
+      "layouts": {
+        "day": {
+          "timelineFrameGlobal": { "x": 0, "y": 140, "width": 393, "height": 678 },
+          "scrollOffsetY": 480,
+          "hourHeight": 60,
+          "timeColumnWidth": 52,
+          "eventAreaLeadingInset": 8
+        },
+        "month": {
+          "gridFrameGlobal": { "x": 16, "y": 186, "width": 361, "height": 300 },
+          "cells": [
+            { "date": "2026-04-25", "frameGlobal": { "x": 23, "y": 322, "width": 48, "height": 44 } }
+          ]
+        },
+        "year": {
+          "gridFrameGlobal": { "x": 16, "y": 118, "width": 361, "height": 590 },
+          "cells": [
+            { "date": "2026-04-25", "frameGlobal": { "x": 54, "y": 280, "width": 16, "height": 12 } },
+            { "date": "2026-04-26", "frameGlobal": { "x": 72, "y": 280, "width": 16, "height": 12 } }
+          ]
+        }
+      },
+      "split": "test"
+    }
+  ]
+}

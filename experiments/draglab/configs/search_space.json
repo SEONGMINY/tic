@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "searchSpace": {
+    "longPressMinMs": [450, 500, 550],
+    "pressSlopPt": [6, 10, 14],
+    "dragStartMinDistancePt": [4, 6, 8],
+    "hoverActivationMs": [80, 120, 160],
+    "hoverExitMs": [60, 80, 100],
+    "cellHitInsetPt": [4, 6, 10],
+    "cellHysteresisPt": [8, 12, 16],
+    "timelineDropInsetPt": [4, 8, 12],
+    "minuteSnapStep": [15, 30],
+    "restoreAnimationMs": [180, 220, 260],
+    "reanchorBlendMs": [100, 140, 180]
+  }
+}
