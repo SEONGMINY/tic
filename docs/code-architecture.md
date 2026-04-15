@@ -52,17 +52,17 @@ tic/
 │   └── SearchViewModel.swift        // 검색어, 필터링, 기록
 │
 ├── Views/
-│   ├── ContentView.swift            // 루트: scope 전환, pinch, 내비바, LA 시작 로직
+│   ├── ContentView.swift            // 루트: scope pinch bridge owner, 내비바, LA 시작 로직
 │   ├── Calendar/
 │   │   ├── YearView.swift           // 12개월 그리드 + "올해" 버튼
 │   │   ├── MonthView.swift          // 캘린더 그리드 + "이번달" 버튼
-│   │   └── DayView.swift            // 주간 스트립 + 타임라인 + phantom block + 편집 모드 상태
+│   │   └── DayView.swift            // 주간 스트립 + 타임라인 + phantom block + 편집 모드 상태 (legacy edge-hover 상태는 제거 대상)
 │   ├── EventFormView.swift          // Segmented Control + 하루종일 토글 + 둥근 스타일
 │   ├── SearchView.swift
 │   ├── SettingsView.swift
 │   └── Components/
 │       ├── TimelineView.swift       // 24시간 타임라인 + 이벤트 블록 (기본 상태)
-│       ├── EditableEventBlock.swift  // 편집 모드 핸들 + 리사이즈 + 이동 + toolbar (500줄 초과 시 분리)
+│       ├── EditableEventBlock.swift  // 편집 모드 핸들 + 리사이즈 + pointer forwarding + toolbar
 │       ├── NextActionCard.swift
 │       └── ChecklistSheet.swift
 │
@@ -182,7 +182,9 @@ final class CalendarDragCoordinator {
 ```
 
 - `ContentView`가 `CalendarDragCoordinator`를 단일 owner로 가진다.
+- `ContentView`가 `pinch scope transition` bridge의 owner다.
 - `DayView`, `MonthView`, `YearView`는 owner가 아니라 geometry/frame reporting 역할만 가진다.
+- `DayView`의 legacy `edge-hover` timer/indicator 상태는 제거 대상이다.
 - scope가 바뀌어도 coordinator와 overlay는 유지된다.
 
 ## z-index / 제스처 우선순위
@@ -201,7 +203,7 @@ ZStack 순서 (아래 → 위):
 
 ## 날짜 간 블록 이동 (overlay 패턴)
 
-드래그 중인 블록을 타임라인에서 분리 → `ContentView` 수준의 root overlay owner가 렌더링한다. 타임라인 전환 애니메이션과 drag session 수명을 분리하기 위함이다.
+드래그 중인 블록을 타임라인에서 분리 → `ContentView` 수준의 root overlay owner가 렌더링한다. 타임라인 전환 애니메이션과 drag session 수명을 분리하기 위함이다. 이 경로가 cross-day / cross-scope 이동의 단일 `root drag path`다.
 
 ```swift
 struct DateCellFrame {
@@ -233,7 +235,9 @@ struct DragSessionContext {
 핵심 규칙:
 
 - drag session은 day → month/year 전환 중에도 유지된다.
+- `pinch scope transition`은 `ContentView`가 owner인 bridge를 통해 같은 session 위에서 처리한다.
 - 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로만 렌더링한다.
+- `EditableEventBlock`은 local move completion owner가 아니라 pointer forwarding 역할만 가진다.
 - `droppable`은 독립 top-level state가 아니라, current state + candidate 유효성에서 계산되는 파생 판정이다.
 - invalid drop, overflow, missing candidate는 clamp보다 `restore`를 우선한다.
 - overlay와 날짜 셀 hit-test는 모두 `global coordinates`를 기준으로 계산한다.
@@ -268,10 +272,11 @@ enum DragOutcome {
 `CalendarDragCoordinator`는 SwiftUI glue layer다.
 
 - `ContentView`가 단일 인스턴스를 소유한다.
-- `viewModel.scope` 변경을 감지해 엔진에 새 scope를 전달한다.
+- `viewModel.scope` 변경과 `pinch scope transition`을 감지해 엔진에 새 scope를 전달한다.
 - timeline frame과 month/year 날짜 셀 frame registry를 유지한다.
 - root overlay 렌더링에 필요한 `overlaySnapshot`을 제공한다.
 - EventKit write는 최종 drop 확정 시에만 호출하고, 계산 로직은 여전히 엔진/geometry에 둔다.
+- session cleanup은 `CalendarDragCoordinator`와 root scope에서 commit/cancel/restore 이후 일관되게 수행한다.
 
 ## Swift / Python 공통 계약
 

@@ -8,7 +8,9 @@
     {
       "phase": 0,
       "name": "docs-alignment",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-04-16T02:35:33+0900",
+      "completed_at": "2026-04-16T02:38:35+0900"
     },
     {
       "phase": 1,
