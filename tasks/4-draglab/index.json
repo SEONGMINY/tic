@@ -1,0 +1,34 @@
+{
+  "project": "tic",
+  "task": "draglab",
+  "prompt": "캘린더 앱의 타임라인 블록 Drag and Drop 제스처를 고도화하고 싶다.\n\n이 기능은 단순히 블록을 이동시키는 수준이 아니라, 드래그 시작 판정, 드래그 중 상태 유지, 화면 전역 이동, 월/년 캘린더로의 전환, 날짜 변경 후 Drop, 취소 및 복원까지 포함하는 전체 상태 전이 로직을 안정적으로 설계해야 한다.\n\n현재 내가 구현하려는 동작은 다음과 같다.\n\n1. 타임라인 블록을 Drag and Drop 가능한 상태로 진입시키면, 생성 제스처 때와 마찬가지로 원본 블록은 임시 타임라인 블록처럼 보이고, 실제로 이동 중인 진한 타임라인 블록이 별도로 나타난다.\n2. 타임라인 블록은 원래 타임라인 블록 내에서 시작되지만, Drag and Drop 상태에 들어간 이후에는 화면 어디든 자유롭게 이동할 수 있어야 한다.\n3. 이 과정에서 블록의 프레임 변화가 영상처럼 자연스럽게 보여야 하며, 좌표 점프나 크기 변화가 어색하지 않아야 한다.\n4. 타임라인 블록을 Drag and Drop 할 수 있는 상태를 유지한 채 월/년 캘린더로 이동할 수 있어야 한다.\n5. 월/년 캘린더에서 다른 날짜로 이동한 뒤에도 drag session 이 유지되어야 하며, 이후 해당 날짜에 Drop 할 수 있어야 한다.\n6. Drop 시에는 최종 위치와 선택된 날짜를 기준으로 올바른 시작 시간, 종료 시간, 날짜가 계산되어야 한다.\n7. 잘못된 위치에 Drop 하거나 취소해야 하는 상황에서는 잘못 확정되지 않고 자연스럽게 복원 또는 종료되어야 한다.\n\n이 기능을 구현하기 전에, Python CLI 환경에서 반복적으로 실험하면서 Drag and Drop 관련 threshold 및 상태 전이 로직을 최적화하고 싶다.\nSwift 환경보다 Python 환경에서 빠르게 반복 실행하며 적절한 변수값을 먼저 찾고, 이후 그 값들을 Swift 코드에 그대로 반영하는 것이 목표다.\n\n이를 위해 아래 3개의 JSON 파일이 준비되어 있다고 가정한다.\n\n* `sessions.json`: 세션별 메타 정보, 화면 크기, timezone, 시나리오, 블록 정보 등\n* `events.json`: touch_start, long_press_recognized, drag_start, drag_move, calendar_mode_enter, hover_date, drop, cancel 등의 이벤트 로그\n* `expected.json`: 각 세션에 대해 기대되는 drag 시작 여부, 기대 시간 범위, 기대 hover 날짜, 기대 drop 성공 여부, 기대 최종 date/startMinute/endMinute 등의 정답 데이터\n\n이 3개의 JSON 파일을 입력으로 사용하여 다음을 수행하는 실험 구조를 설계해달라.\n\n1. 전체 제스처를 상태 머신으로 정의해달라.\n   최소한 idle, pressing, drag_ready, dragging_timeline, dragging_calendar, droppable, dropped, cancelled, restoring 같은 상태가 필요할지 검토하고, 각 상태 전이 조건을 명확히 정의해달라.\n\n2. Python CLI 환경에서 반복 실행 가능한 실험 구조를 설계해달라.\n   예를 들어 입력 JSON 로드, 세션별 재생, 상태 전이 계산, 결과 평가, score 집계, 파라미터 탐색이 가능한 구조여야 한다.\n\n3. Swift와 Python이 동일한 계산 기준을 사용하도록 데이터 계약을 제안해달라.\n   예를 들어 화면 좌표계, y 좌표를 minute 로 환산하는 규칙, 월/년 캘린더에서 날짜 셀을 activeDate 로 판정하는 규칙, Drop 시 시간 snap 방식 등을 일치시켜야 한다.\n\n4. 조정 가능한 파라미터 후보를 제안해달라.\n   예를 들어 long press 최소 시간, drag 시작 최소 이동 거리, cancel 기준, hover date 활성화 지연, drop 가능 판정 범위, minute snap 간격, 복원 조건 등을 후보로 두고 실험할 수 있어야 한다.\n\n5. 각 세션에 대해 알고리즘 결과를 expected.json 과 비교하여 자동 채점할 수 있는 평가 방식을 설계해달라.\n   예를 들어 drag 시작 시점 오차, hover date 일치 여부, 잘못된 drop 방지 여부, 최종 date/startMinute/endMinute 일치 여부를 기반으로 점수를 계산할 수 있어야 한다.\n\n6. 잘못된 시나리오도 반드시 방어하도록 설계해달라.\n   예를 들어 drag 시작으로 보면 안 되는 입력, 월/년 캘린더 진입 후 잘못된 날짜 hover, drop 하면 안 되는 위치에서의 손 뗌, drag 도중 취소해야 하는 케이스 등을 포함해야 한다.\n\n7. “자연스러움”을 정성 표현이 아니라 측정 가능한 값으로 바꾸는 방법도 제안해달라.\n   예를 들어 연속 이벤트 간 좌표 점프량, 상태 전이 직후 frame 불연속, 원본 블록과 드래그 블록 간 정합성, 복원 시 이동 거리 및 시간 등을 metric 으로 정의할 수 있으면 좋다.\n\n최종적으로는 다음 결과를 원한다.\n\n* Python 실험 코드의 디렉토리 구조\n* JSON 파일 포맷 제안\n* 상태 머신 정의\n* 실험 파라미터 목록\n* 자동 채점 방식\n* Swift에 그대로 옮길 수 있는 핵심 계산 규칙\n\n이 실험을 진행하기위한 구체적인 계획을 세우기위해 조금이라도 모호하거나 구체화해야할 것이 있다면 내게 알려달라.",
+  "totalPhases": 5,
+  "created_at": "2026-04-16T01:32:28+0900",
+  "phases": [
+    {
+      "phase": 0,
+      "name": "docs-alignment",
+      "status": "pending"
+    },
+    {
+      "phase": 1,
+      "name": "contracts-and-fixtures",
+      "status": "pending"
+    },
+    {
+      "phase": 2,
+      "name": "engine-core",
+      "status": "pending"
+    },
+    {
+      "phase": 3,
+      "name": "scoring-and-metrics",
+      "status": "pending"
+    },
+    {
+      "phase": 4,
+      "name": "parallel-search-cli",
+      "status": "pending"
+    }
+  ]
+}
