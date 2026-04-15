@@ -36,6 +36,7 @@ struct MonthView: View {
                             )
                             .id(offset)
                             .onAppear {
+                                viewModel.displayedMonth = month.startOfMonth
                                 viewModel.displayedYear = month.year
                             }
                         }

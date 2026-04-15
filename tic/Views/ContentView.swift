@@ -29,6 +29,8 @@ struct ContentView: View {
             scopeView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
+                .contentShape(Rectangle())
+                .simultaneousGesture(scopePinchGesture, including: .all)
                 .animation(.spring(duration: 0.35, bounce: 0.05), value: viewModel.scope)
         }
         .simultaneousGesture(rootDragGesture, including: .all)
@@ -126,9 +128,7 @@ struct ContentView: View {
             }
         case .month:
             Button {
-                withAnimation(.spring(duration: 0.4, bounce: 0.05)) {
-                    viewModel.scope = .year
-                }
+                applyScopeTransition(.pinchOut)
             } label: {
                 HStack(spacing: 2) {
                     Image(systemName: "chevron.left")
@@ -140,9 +140,7 @@ struct ContentView: View {
             }
         case .day:
             Button {
-                withAnimation(.spring(duration: 0.4, bounce: 0.05)) {
-                    viewModel.scope = .month
-                }
+                applyScopeTransition(.pinchOut)
             } label: {
                 HStack(spacing: 2) {
                     Image(systemName: "chevron.left")
@@ -236,6 +234,31 @@ struct ContentView: View {
                 guard let commit = dragCoordinator.completeGlobalDrag() else { return }
                 applyGlobalDragCommit(item, commit: commit)
             }
+    }
+
+    private var scopePinchGesture: some Gesture {
+        // Product spec uses "pinch in" for detail scope and "pinch out" for broader scope.
+        MagnifyGesture(minimumScaleDelta: 0.08)
+            .onEnded { value in
+                if value.magnification > 1 {
+                    applyScopeTransition(.pinchIn)
+                } else if value.magnification < 1 {
+                    applyScopeTransition(.pinchOut)
+                }
+            }
+    }
+
+    private func applyScopeTransition(_ direction: CalendarScopePinchDirection) {
+        guard let nextState = CalendarScopeTransition.nextState(
+            from: viewModel.scopeTransitionState,
+            pinch: direction
+        ) else {
+            return
+        }
+
+        withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
+            viewModel.applyScopeTransitionState(nextState)
+        }
     }
 
     // MARK: - Live Activity 자동 시작
