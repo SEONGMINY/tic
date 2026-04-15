@@ -23,6 +23,12 @@
  + 탭 → F5 (일정 생성, 빈 폼)
  🔍 탭 → F6 (검색)
  ⚙️ 탭 → F8 (설정)
+
+ drag session 중:
+  month scope는 전환 대상이 될 수 있음
+  전환 뒤에도 drag session 유지
+  각 날짜 셀 hover → activeDate 갱신
+  drop 시 activeDate + minuteCandidate로 최종 확정
 ```
 
 ## F3: 일간 뷰
@@ -75,6 +81,11 @@
   꼭짓점 드래그 → 리사이즈 (15분 스냅, 최소 30분)
   블록 본체 y축 드래그 → 같은 날 이동 (15분 스냅, 자동 스크롤)
   블록 본체 좌우 드래그 → 날짜 전환 slide + 새 날짜 배치 (손가락 위치 기준)
+  drag session 중 Pinch out → month/year scope로 전환 가능
+  drag session 중 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로 유지
+  day timeline에서는 `dateCandidate`, `minuteCandidate`를 둘 다 갱신
+  month/year에서는 `activeDate`만 갱신하고 `minuteCandidate`는 drag session이 유지
+  drop 시 `dateCandidate + minuteCandidate + duration`으로 확정
   삭제 탭 → 확인 alert → EventKit 삭제
   복제 탭 → 같은 시간에 즉시 배치 (반복 규칙 제외, sheet 없음)
 
@@ -82,6 +93,7 @@
   빈 영역 탭 → 편집 모드 완전 해제
   편집 블록 탭 → toolbar만 닫힘, 편집 모드 유지
   다른 블록 long press → 현재 해제 → 새 블록 편집 모드
+  invalid drop / overflow / hover 미확정 / cancel → restore 후 종료
 
  비활성화:
   타임라인 좌우 스와이프 (블록 드래그와 충돌 방지)
@@ -148,6 +160,12 @@
  월 탭 → F2 (해당 월의 월간 뷰)
  Pinch in → F2 (월간 뷰)
  "올해" 탭 → 올해로 스크롤
+
+ drag session 중:
+  year scope도 전환 대상이 될 수 있음
+  pointer가 날짜 셀 위에서 안정적으로 머물면 activeDate 갱신
+  drop은 activeDate가 있고 minuteCandidate가 유지된 경우에만 허용
+  invalid drop은 확정하지 않고 restore
 ```
 
 ## F8: 설정

@@ -71,6 +71,13 @@ tic/
 │   └── WidgetIntents.swift          // CompleteEventIntent, SnoozeEventIntent
 │
 └── TicLiveActivityView.swift        // Lock Screen + Dynamic Island (progress line UI)
+
+experiments/
+└── draglab/
+    ├── data/                        // sessions.json, events.json, expected.json
+    ├── configs/                     // baseline/search-space
+    ├── src/draglab/                 // models, contracts, geometry, state machine, scoring, cli
+    └── tests/                       // 순수 Python 테스트
 ```
 
 ## 서비스 계약
@@ -154,6 +161,8 @@ phantomBlock: PhantomBlock?
 
 이유: UI 제스처 상태가 서비스 레이어와 혼재되면 책임 경계가 흐려짐.
 
+단, cross-scope drag가 커지면 View의 임시 상태만으로는 상태 전이 규칙을 안전하게 유지하기 어렵다. 그래서 SwiftUI View가 모든 제스처 로직을 직접 품는 대신, 순수 로직을 담는 `DragSessionEngine` 계층을 별도로 둔다.
+
 ## z-index / 제스처 우선순위
 
 ```
@@ -179,6 +188,90 @@ struct CrossDayDragState {
     var targetDate: Date        // 이동할 날짜
 }
 ```
+
+cross-scope drag까지 확장할 때는 아래 정보를 별도 drag session 컨텍스트로 추적한다.
+
+```swift
+struct DragSessionContext {
+    let itemId: String
+    let sourceDate: Date
+    let sourceStartMinute: Int
+    let sourceEndMinute: Int
+    let durationMinute: Int
+    var currentScope: CalendarScope
+    var pointerGlobal: CGPoint
+    var fingerToBlockAnchor: CGSize
+    var overlayFrameGlobal: CGRect
+    var dateCandidate: Date?
+    var minuteCandidate: Int?
+    var activeDate: Date?
+    var invalidReason: String?
+}
+```
+
+핵심 규칙:
+
+- drag session은 day → month/year 전환 중에도 유지된다.
+- 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로만 렌더링한다.
+- `droppable`은 독립 top-level state가 아니라, current state + candidate 유효성에서 계산되는 파생 판정이다.
+- invalid drop, overflow, missing candidate는 clamp보다 `restore`를 우선한다.
+
+## DragSessionEngine
+
+SwiftUI View는 이벤트를 전달하고 결과를 렌더링만 한다. 상태 전이와 geometry 계산은 순수 로직 레이어가 담당한다.
+
+```swift
+enum DragState {
+    case idle
+    case pressing
+    case dragReady
+    case draggingTimeline
+    case draggingCalendar
+    case restoring
+}
+
+enum DragOutcome {
+    case none
+    case dropped
+    case cancelled
+}
+```
+
+- `DayView`, `TimelineView`, `MonthView`, `YearView`는 pointer/scope 이벤트를 모아 `DragSessionEngine`에 전달한다.
+- 엔진은 `DragSessionContext`, `DragState`, 파생 `droppable`, overlay frame, drop candidate를 계산한다.
+- Swift 구현 전에 동일한 규칙을 Python `draglab`에서 먼저 검증한다.
+
+## Swift / Python 공통 계약
+
+Swift와 Python은 아래 계산 기준을 공유한다.
+
+- 좌표계 단위: iOS point 기준 `global coordinates`
+- `timelineLocalY = pointerGlobalY - timelineFrame.minY + scrollOffsetY`
+- `rawMinute = timelineLocalY / hourHeight * 60`
+- `minuteCandidate = snap(clamp(rawMinute, 0, 1439), snapStep)`
+- `dateCandidate`는 month/year cell hit-test와 hover hysteresis 규칙으로 계산
+- 최종 drop은 `dateCandidate + minuteCandidate + duration`으로 계산
+- `minuteCandidate`가 없거나 overflow가 발생하면 drop을 막고 `restore`
+
+이 계약은 `experiments/draglab/README.md`와 Python 코드에서 먼저 고정한 뒤 Swift로 이식한다.
+
+## Python draglab
+
+`experiments/draglab/`은 아래 역할을 가진다.
+
+- JSON fixture 로드 및 계약 검증
+- drag session 상태 머신 재생
+- geometry/date/minute 계산 검증
+- expected 기반 자동 채점
+- 자연스러움 metric 측정
+- threshold/config 탐색
+
+병렬 실험 원칙:
+
+- 세션 내부 이벤트 처리는 항상 순차
+- 병렬화 단위는 `config` 또는 `session chunk`
+- nested pool 금지
+- deterministic seed 유지
 
 ## 타임라인 레이아웃 알고리즘
 column-packing: 시작 시간 정렬 → 충돌 클러스터 그룹화 → 탐욕적 열 할당 → 너비 균등 분할. 뷰 body 바깥에서 `LayoutAttributes` 미리 계산, 날짜별 캐시.
