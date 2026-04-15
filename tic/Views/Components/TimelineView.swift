@@ -5,15 +5,33 @@ struct PhantomBlockInfo {
     let minute: Int
 }
 
+private struct TimelineViewportPreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+private struct TimelineScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct TimelineView: View {
     var timedItems: [TicItem]
     var layout: [String: LayoutAttributes]
     var selectedDate: Date
     var phantomBlock: PhantomBlockInfo?
+    var dragCoordinator: CalendarDragCoordinator
     var onEventTap: (TicItem) -> Void
     var onTimeSlotLongPress: (Date) -> Void
     var onDeleteItem: (TicItem) -> Void
     var onCompleteItem: (TicItem) -> Void
+    var onTimelineLayoutChange: (_ frameGlobal: CGRect, _ scrollOffsetY: CGFloat) -> Void
 
     // Edit mode
     @Binding var editingItemId: String?
@@ -28,110 +46,180 @@ struct TimelineView: View {
     let hourHeight: CGFloat = 60
     private let timeColumnWidth: CGFloat = 52
     private let eventAreaLeadingInset: CGFloat = 8
+    @State private var viewportFrameGlobal: CGRect = .zero
+    @State private var scrollOffsetY: CGFloat = 0
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                ZStack(alignment: .topLeading) {
-                    // 1. Time lines + time label long press
-                    timeLines
+        GeometryReader { viewportProxy in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    ZStack(alignment: .topLeading) {
+                        // 1. Time lines + time label long press
+                        timeLines
 
-                    // 2. Empty slot long press (disabled in edit mode)
-                    emptySlotGestures
-                        .allowsHitTesting(editingItemId == nil)
+                        // 2. Empty slot long press (disabled in edit mode)
+                        emptySlotGestures
+                            .allowsHitTesting(editingItemId == nil)
 
-                    // 3. Event blocks (non-editing)
-                    GeometryReader { geometry in
-                        let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
-                        ForEach(timedItems, id: \.id) { item in
-                            if item.id != editingItemId {
-                                eventBlock(for: item, containerWidth: eventAreaWidth)
+                        // 3. Event blocks (non-editing)
+                        GeometryReader { geometry in
+                            let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
+                            ForEach(timedItems, id: \.id) { item in
+                                if item.id != editingItemId {
+                                    eventBlock(for: item, containerWidth: eventAreaWidth)
+                                }
                             }
                         }
-                    }
-                    .zIndex(1)
+                        .zIndex(1)
 
-                    // 4. Phantom block
-                    if let phantom = phantomBlock {
-                        GeometryReader { geometry in
-                            let yPos = (CGFloat(phantom.hour) + CGFloat(phantom.minute) / 60.0) * hourHeight
-                            let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.orange.opacity(0.4))
-                                .frame(width: eventAreaWidth - 2, height: hourHeight - 1)
-                                .offset(x: timeColumnWidth + eventAreaLeadingInset, y: yPos)
+                        // 4. Phantom block
+                        if let phantom = phantomBlock {
+                            GeometryReader { geometry in
+                                let yPos = (CGFloat(phantom.hour) + CGFloat(phantom.minute) / 60.0) * hourHeight
+                                let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.orange.opacity(0.4))
+                                    .frame(width: eventAreaWidth - 2, height: hourHeight - 1)
+                                    .offset(x: timeColumnWidth + eventAreaLeadingInset, y: yPos)
+                            }
+                            .zIndex(0.5)
                         }
-                        .zIndex(0.5)
-                    }
 
-                    // 5. Current time line (today only)
-                    if selectedDate.isToday {
-                        currentTimeLine
-                            .zIndex(2)
-                            .id("nowLine")
-                    }
+                        // 5. Current time line (today only)
+                        if selectedDate.isToday {
+                            currentTimeLine
+                                .zIndex(2)
+                                .id("nowLine")
+                        }
 
-                    // 6. Editing block overlay — zIndex 3, NO GeometryReader to avoid re-layout jitter
-                    if let editId = editingItemId,
-                       let item = timedItems.first(where: { $0.id == editId }) {
-                        GeometryReader { geometry in
-                            let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
-                            let editAttrs = layout[item.id]
-                            let editWidth = (editAttrs?.widthFraction ?? 1.0) * eventAreaWidth
-                            let editXPos = timeColumnWidth + eventAreaLeadingInset + (editAttrs?.xOffset ?? 0) * eventAreaWidth
+                        // 6. Editing block overlay / placeholder
+                        if let editId = editingItemId,
+                           let item = timedItems.first(where: { $0.id == editId }) {
+                            GeometryReader { geometry in
+                                let eventAreaWidth = geometry.size.width - timeColumnWidth - eventAreaLeadingInset
+                                let editAttrs = layout[item.id]
+                                let editWidth = (editAttrs?.widthFraction ?? 1.0) * eventAreaWidth
+                                let editXPos = timeColumnWidth + eventAreaLeadingInset + (editAttrs?.xOffset ?? 0) * eventAreaWidth
+                                let baseYPos = yPosition(for: item.startDate)
+                                let baseHeight = eventHeight(start: item.startDate, end: item.endDate)
+                                let baseFrameGlobal = CGRect(
+                                    x: geometry.frame(in: .global).minX + editXPos,
+                                    y: geometry.frame(in: .global).minY + baseYPos,
+                                    width: max(editWidth - 2, 0),
+                                    height: max(baseHeight - 1, 16)
+                                )
 
-                            let editBgColor: Color = {
-                                if let cgColor = item.calendarColor as CGColor? {
-                                    return Color(cgColor: cgColor)
+                                let editBgColor: Color = {
+                                    if let cgColor = item.calendarColor as CGColor? {
+                                        return Color(cgColor: cgColor)
+                                    }
+                                    return .gray
+                                }()
+
+                                if dragCoordinator.isShowingPlaceholder(for: item.id) {
+                                    blockContent(
+                                        for: item,
+                                        bgColor: editBgColor,
+                                        width: max(editWidth - 2, 0),
+                                        height: max(baseHeight - 1, 16)
+                                    )
+                                    .opacity(0.32)
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                    }
+                                    .offset(x: editXPos, y: baseYPos)
+                                    .allowsHitTesting(false)
+                                } else {
+                                    EditableEventBlock(
+                                        item: item,
+                                        bgColor: editBgColor,
+                                        frameWidth: max(editWidth - 2, 0),
+                                        baseYPos: baseYPos,
+                                        baseHeight: baseHeight,
+                                        xPos: editXPos,
+                                        hourHeight: hourHeight,
+                                        totalTimelineHeight: 24 * hourHeight + 20,
+                                        containerWidth: geometry.size.width,
+                                        baseFrameGlobal: baseFrameGlobal,
+                                        showEditToolbar: $showEditToolbar,
+                                        editingItemId: $editingItemId,
+                                        isEditingGestureActive: $isEditingGestureActive,
+                                        onDeleteItem: onDeleteItem,
+                                        onResizeItem: onResizeItem,
+                                        onMoveItem: onMoveItem,
+                                        onDuplicateItem: onDuplicateItem,
+                                        onMoveGestureBegan: { frameGlobal, pointerGlobal in
+                                            dragCoordinator.beginDayDrag(
+                                                item: item,
+                                                sourceFrameGlobal: frameGlobal,
+                                                pointerGlobal: pointerGlobal
+                                            )
+                                        },
+                                        onMoveGestureChanged: { pointerGlobal in
+                                            dragCoordinator.updateDayDrag(pointerGlobal: pointerGlobal)
+                                        },
+                                        onMoveGestureEnded: {
+                                            guard dragCoordinator.shouldHandleDropLocally else {
+                                                return
+                                            }
+                                            if let commit = dragCoordinator.dropDayDrag() {
+                                                onMoveItem(item.id, commit.start, commit.end)
+                                            }
+                                        },
+                                        onEdgeHover: onEdgeHover,
+                                        onEdgeClear: onEdgeClear
+                                    )
                                 }
-                                return .gray
-                            }()
-
-                            EditableEventBlock(
-                                item: item,
-                                bgColor: editBgColor,
-                                frameWidth: max(editWidth - 2, 0),
-                                baseYPos: yPosition(for: item.startDate),
-                                baseHeight: eventHeight(start: item.startDate, end: item.endDate),
-                                xPos: editXPos,
-                                hourHeight: hourHeight,
-                                totalTimelineHeight: 24 * hourHeight + 20,
-                                containerWidth: geometry.size.width,
-                                showEditToolbar: $showEditToolbar,
-                                editingItemId: $editingItemId,
-                                isEditingGestureActive: $isEditingGestureActive,
-                                onDeleteItem: onDeleteItem,
-                                onResizeItem: onResizeItem,
-                                onMoveItem: onMoveItem,
-                                onDuplicateItem: onDuplicateItem,
-                                onEdgeHover: onEdgeHover,
-                                onEdgeClear: onEdgeClear
+                            }
+                            .zIndex(3)
+                        }
+                    }
+                    .frame(height: 24 * hourHeight + 20)
+                    .background {
+                        GeometryReader { contentGeometry in
+                            Color.clear.preference(
+                                key: TimelineScrollOffsetPreferenceKey.self,
+                                value: -contentGeometry.frame(in: .named("timelineScroll")).minY
                             )
                         }
-                        .zIndex(3)
+                    }
+                    // Tap to dismiss edit mode — only when NOT dragging (via background layer)
+                    .background {
+                        if editingItemId != nil && !isEditingGestureActive {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    editingItemId = nil
+                                    showEditToolbar = false
+                                }
+                        }
                     }
                 }
-                .frame(height: 24 * hourHeight + 20)
-                // Tap to dismiss edit mode — only when NOT dragging (via background layer)
+                .coordinateSpace(name: "timelineScroll")
                 .background {
-                    if editingItemId != nil && !isEditingGestureActive {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                editingItemId = nil
-                                showEditToolbar = false
-                            }
-                    }
+                    Color.clear.preference(
+                        key: TimelineViewportPreferenceKey.self,
+                        value: viewportProxy.frame(in: .global)
+                    )
                 }
-            }
-            .scrollDisabled(isEditingGestureActive)
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    if selectedDate.isToday {
-                        let hour = Calendar.current.component(.hour, from: Date())
-                        withAnimation(.none) { proxy.scrollTo("hour_\(max(0, hour - 1))", anchor: .top) }
-                    } else {
-                        withAnimation(.none) { proxy.scrollTo("hour_8", anchor: .top) }
+                .onPreferenceChange(TimelineViewportPreferenceKey.self) { value in
+                    viewportFrameGlobal = value
+                    onTimelineLayoutChange(value, scrollOffsetY)
+                }
+                .onPreferenceChange(TimelineScrollOffsetPreferenceKey.self) { value in
+                    scrollOffsetY = value
+                    onTimelineLayoutChange(viewportFrameGlobal, value)
+                }
+                .scrollDisabled(isEditingGestureActive || dragCoordinator.isSessionVisible)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if selectedDate.isToday {
+                            let hour = Calendar.current.component(.hour, from: Date())
+                            withAnimation(.none) { proxy.scrollTo("hour_\(max(0, hour - 1))", anchor: .top) }
+                        } else {
+                            withAnimation(.none) { proxy.scrollTo("hour_8", anchor: .top) }
+                        }
                     }
                 }
             }

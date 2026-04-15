@@ -13,6 +13,7 @@ struct DayView: View {
     var eventKitService: EventKitService
     var eventFormViewModel: EventFormViewModel
     var notificationService: NotificationService
+    var dragCoordinator: CalendarDragCoordinator
     var onEditItem: (TicItem) -> Void
 
     @State private var showActionSheet = false
@@ -75,6 +76,51 @@ struct DayView: View {
         return items.sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }
 
+    private var timelineLayoutAttributes: [String: LayoutAttributes] {
+        dayViewModel.computeLayout(
+            for: effectiveTimedItems,
+            containerWidth: UIScreen.main.bounds.width - 60
+        )
+    }
+
+    @ViewBuilder
+    private var timelineSection: some View {
+        VStack(spacing: 0) {
+            if !dayViewModel.allDayItems.isEmpty {
+                allDaySection
+            }
+
+            timelineView
+        }
+    }
+
+    private var timelineView: some View {
+        TimelineView(
+            timedItems: effectiveTimedItems,
+            layout: timelineLayoutAttributes,
+            selectedDate: viewModel.selectedDate,
+            phantomBlock: phantomBlock,
+            dragCoordinator: dragCoordinator,
+            onEventTap: { onEditItem($0) },
+            onTimeSlotLongPress: handleTimeSlotLongPress,
+            onDeleteItem: handleDeleteRequest,
+            onCompleteItem: handleComplete,
+            onTimelineLayoutChange: handleTimelineLayoutChange,
+            editingItemId: $editingItemId,
+            showEditToolbar: $showEditToolbar,
+            isEditingGestureActive: $isEditingGestureActive,
+            onResizeItem: commitMovedItem,
+            onMoveItem: commitMovedItem,
+            onDuplicateItem: handleDuplicate,
+            onEdgeHover: { item, direction in
+                startEdgeHover(item: item, direction: direction)
+            },
+            onEdgeClear: {
+                cancelEdgeHover()
+            }
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // 주간 스트립 (탭 + 스와이프)
@@ -91,86 +137,7 @@ struct DayView: View {
 
             // 타임라인 영역
             ZStack(alignment: .bottomTrailing) {
-                VStack(spacing: 0) {
-                    if !dayViewModel.allDayItems.isEmpty {
-                        allDaySection
-                    }
-
-                    TimelineView(
-                        timedItems: effectiveTimedItems,
-                        layout: dayViewModel.computeLayout(
-                            for: effectiveTimedItems,
-                            containerWidth: UIScreen.main.bounds.width - 60
-                        ),
-                        selectedDate: viewModel.selectedDate,
-                        phantomBlock: phantomBlock,
-                        onEventTap: { item in onEditItem(item) },
-                        onTimeSlotLongPress: { date in
-                            let calendar = Calendar.current
-                            let hour = calendar.component(.hour, from: date)
-                            let minute = calendar.component(.minute, from: date)
-                            phantomBlock = PhantomBlockInfo(hour: hour, minute: minute)
-                            createDate = date
-                            eventFormViewModel.prepareForCreate(at: date)
-                            showCreateSheet = true
-                        },
-                        onDeleteItem: { item in
-                            itemToDelete = item
-                            showDeleteAlert = true
-                        },
-                        onCompleteItem: { item in
-                            try? eventKitService.complete(item)
-                        },
-                        editingItemId: $editingItemId,
-                        showEditToolbar: $showEditToolbar,
-                        isEditingGestureActive: $isEditingGestureActive,
-                        onResizeItem: { itemId, newStart, newEnd in
-                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
-                                do {
-                                    try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        pendingEditingDates = PendingEditingDates(
-                                            itemId: itemId,
-                                            item: item,
-                                            start: newStart,
-                                            end: newEnd
-                                        )
-                                    }
-                                } catch {
-                                    pendingEditingDates = nil
-                                }
-                            }
-                        },
-                        onMoveItem: { itemId, newStart, newEnd in
-                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
-                                do {
-                                    try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        pendingEditingDates = PendingEditingDates(
-                                            itemId: itemId,
-                                            item: item,
-                                            start: newStart,
-                                            end: newEnd
-                                        )
-                                    }
-                                } catch {
-                                    pendingEditingDates = nil
-                                }
-                            }
-                        },
-                        onDuplicateItem: { itemId in
-                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
-                                try? eventKitService.duplicate(item)
-                            }
-                        },
-                        onEdgeHover: { item, direction in
-                            startEdgeHover(item: item, direction: direction)
-                        },
-                        onEdgeClear: {
-                            cancelEdgeHover()
-                        }
-                    )
-                }
+                timelineSection
                 .id(contentId)
                 .transition(.asymmetric(
                     insertion: .move(edge: slideDirection),
@@ -210,9 +177,11 @@ struct DayView: View {
             }
         }
         .task {
+            dragCoordinator.updateVisibleDay(viewModel.selectedDate)
             await refreshDayItems()
         }
         .onChange(of: viewModel.selectedDate) { _, _ in
+            dragCoordinator.updateVisibleDay(viewModel.selectedDate)
             Task {
                 await refreshDayItems()
             }
@@ -262,6 +231,59 @@ struct DayView: View {
         } message: {
             Text("Apple Calendar/Reminders에서도 삭제됩니다.")
         }
+    }
+
+    private func handleTimeSlotLongPress(_ date: Date) {
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: date)
+        let minute = calendar.component(.minute, from: date)
+        phantomBlock = PhantomBlockInfo(hour: hour, minute: minute)
+        createDate = date
+        eventFormViewModel.prepareForCreate(at: date)
+        showCreateSheet = true
+    }
+
+    private func handleDeleteRequest(_ item: TicItem) {
+        itemToDelete = item
+        showDeleteAlert = true
+    }
+
+    private func handleComplete(_ item: TicItem) {
+        try? eventKitService.complete(item)
+    }
+
+    private func commitMovedItem(_ itemId: String, _ newStart: Date, _ newEnd: Date) {
+        guard let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) else {
+            return
+        }
+
+        do {
+            try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+            withAnimation(.easeInOut(duration: 0.18)) {
+                pendingEditingDates = PendingEditingDates(
+                    itemId: itemId,
+                    item: item,
+                    start: newStart,
+                    end: newEnd
+                )
+            }
+        } catch {
+            pendingEditingDates = nil
+        }
+    }
+
+    private func handleTimelineLayoutChange(_ frameGlobal: CGRect, _ scrollOffsetY: CGFloat) {
+        dragCoordinator.updateTimelineLayout(
+            frameGlobal: frameGlobal,
+            scrollOffsetY: scrollOffsetY
+        )
+    }
+
+    private func handleDuplicate(_ itemId: String) {
+        guard let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) else {
+            return
+        }
+        try? eventKitService.duplicate(item)
     }
 
     // MARK: - FAB

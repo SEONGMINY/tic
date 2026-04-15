@@ -17,6 +17,11 @@ schemes:
       targets:
         tic: all
         ticWidgets: all
+        ticTests: [test]
+    test:
+      config: Debug
+      targets:
+        - name: ticTests
     run:
       config: Debug
 
@@ -70,3 +75,17 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.com.miny.tic
+
+  ticTests:
+    type: bundle.unit-test
+    platform: iOS
+    hostApplication: tic
+    sources:
+      - path: ticTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miny.tic.tests
+        GENERATE_INFOPLIST_FILE: true
+        CODE_SIGNING_ALLOWED: false
+    dependencies:
+      - target: tic
