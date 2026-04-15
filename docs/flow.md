@@ -27,7 +27,9 @@
  drag session 중:
   month scope는 전환 대상이 될 수 있음
   전환 뒤에도 drag session 유지
+  overlay는 root scope 위에서 계속 유지
   각 날짜 셀 hover → activeDate 갱신
+  날짜 셀 판정은 global coordinates 기준 hit-test
   drop 시 activeDate + minuteCandidate로 최종 확정
 ```
 
@@ -81,8 +83,9 @@
   꼭짓점 드래그 → 리사이즈 (15분 스냅, 최소 30분)
   블록 본체 y축 드래그 → 같은 날 이동 (15분 스냅, 자동 스크롤)
   블록 본체 좌우 드래그 → 날짜 전환 slide + 새 날짜 배치 (손가락 위치 기준)
-  drag session 중 Pinch out → month/year scope로 전환 가능
+  drag session 중 `viewModel.scope` 변경 경로(예: pinch out)로 month/year scope로 전환 가능
   drag session 중 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로 유지
+  overlay owner는 DayView가 아니라 root `CalendarDragCoordinator`
   day timeline에서는 `dateCandidate`, `minuteCandidate`를 둘 다 갱신
   month/year에서는 `activeDate`만 갱신하고 `minuteCandidate`는 drag session이 유지
   drop 시 `dateCandidate + minuteCandidate + duration`으로 확정
@@ -164,6 +167,7 @@
  drag session 중:
   year scope도 전환 대상이 될 수 있음
   pointer가 날짜 셀 위에서 안정적으로 머물면 activeDate 갱신
+  overlay는 root scope 위에서 유지되고, scope 교체만으로는 종료되지 않음
   drop은 activeDate가 있고 minuteCandidate가 유지된 경우에만 허용
   invalid drop은 확정하지 않고 restore
 ```

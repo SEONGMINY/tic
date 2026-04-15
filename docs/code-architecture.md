@@ -27,6 +27,12 @@ ViewModel → EventKitService → EventKit에 직접 쓰기
 tic/
 ├── ticApp.swift                     // @main, SwiftData, 딥링크 처리
 │
+├── DragSession/
+│   ├── CalendarDragCoordinator.swift // root overlay owner, drag session 수명 관리
+│   ├── DragSessionTypes.swift        // 상태, 컨텍스트, snapshot 계약
+│   ├── DragSessionGeometry.swift     // minute/date/frame 계산 규칙
+│   └── DragSessionEngine.swift       // 순수 상태 전이 엔진
+│
 ├── Models/
 │   ├── TicItem.swift                // 통합 뷰 모델 (struct, 인메모리)
 │   ├── TicActivityAttributes.swift  // ActivityAttributes + ContentState (다중 이벤트)
@@ -69,6 +75,10 @@ tic/
 │   ├── MediumWidget.swift
 │   ├── WidgetProvider.swift
 │   └── WidgetIntents.swift          // CompleteEventIntent, SnoozeEventIntent
+│
+├── ticTests/
+│   ├── DragSessionGeometryTests.swift
+│   └── DragSessionEngineTests.swift
 │
 └── TicLiveActivityView.swift        // Lock Screen + Dynamic Island (progress line UI)
 
@@ -140,14 +150,13 @@ class LiveActivityService {
 
 ## 편집 모드 상태 관리
 
-편집 모드는 트랜지언트 UI 상태 → **DayView @State**로 관리 (ViewModel 아님).
+편집 모드는 트랜지언트 UI 상태 → **DayView @State**로 관리한다. 다만 cross-scope drag session만큼은 `DayView`에 두지 않고 root owner로 올린다.
 
 ```swift
 // DayView @State
 @State var phantomBlock: PhantomBlock?       // {hour, minute, calendar}
 @State var editingItemId: String?            // 편집 중인 블록 ID
 @State var showPhantomSheet: Bool = false
-@State var crossDayDragState: CrossDayDragState?
 
 // TimelineView에 Binding으로 전달
 editingItemId: Binding<String?>
@@ -155,13 +164,26 @@ onResizeStart: (String, Date) -> Void
 onResizeEnd: (String, Date) -> Void
 onMoveItem: (String, Date, Date) -> Void
 onDuplicateItem: (String) -> Void
-onCrossDayDrag: (String, Edge) -> Void
 phantomBlock: PhantomBlock?
 ```
 
 이유: UI 제스처 상태가 서비스 레이어와 혼재되면 책임 경계가 흐려짐.
 
 단, cross-scope drag가 커지면 View의 임시 상태만으로는 상태 전이 규칙을 안전하게 유지하기 어렵다. 그래서 SwiftUI View가 모든 제스처 로직을 직접 품는 대신, 순수 로직을 담는 `DragSessionEngine` 계층을 별도로 둔다.
+
+```swift
+@Observable
+final class CalendarDragCoordinator {
+    var engine: DragSessionEngine
+    var overlaySnapshot: DragSessionSnapshot?
+    var registry: [CalendarScope: [DateCellFrame]]
+    var timelineFrameGlobal: CGRect?
+}
+```
+
+- `ContentView`가 `CalendarDragCoordinator`를 단일 owner로 가진다.
+- `DayView`, `MonthView`, `YearView`는 owner가 아니라 geometry/frame reporting 역할만 가진다.
+- scope가 바뀌어도 coordinator와 overlay는 유지된다.
 
 ## z-index / 제스처 우선순위
 
@@ -179,17 +201,16 @@ ZStack 순서 (아래 → 위):
 
 ## 날짜 간 블록 이동 (overlay 패턴)
 
-드래그 중인 블록을 타임라인에서 분리 → DayView 최상위 overlay로 렌더링. 타임라인 전환 애니메이션과 독립 동작.
+드래그 중인 블록을 타임라인에서 분리 → `ContentView` 수준의 root overlay owner가 렌더링한다. 타임라인 전환 애니메이션과 drag session 수명을 분리하기 위함이다.
 
 ```swift
-struct CrossDayDragState {
-    let item: TicItem
-    var currentOffset: CGSize   // 손가락 위치
-    var targetDate: Date        // 이동할 날짜
+struct DateCellFrame {
+    let date: Date
+    let frameGlobal: CGRect
 }
 ```
 
-cross-scope drag까지 확장할 때는 아래 정보를 별도 drag session 컨텍스트로 추적한다.
+cross-scope drag는 아래 drag session 컨텍스트로 추적한다.
 
 ```swift
 struct DragSessionContext {
@@ -215,6 +236,7 @@ struct DragSessionContext {
 - 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로만 렌더링한다.
 - `droppable`은 독립 top-level state가 아니라, current state + candidate 유효성에서 계산되는 파생 판정이다.
 - invalid drop, overflow, missing candidate는 clamp보다 `restore`를 우선한다.
+- overlay와 날짜 셀 hit-test는 모두 `global coordinates`를 기준으로 계산한다.
 
 ## DragSessionEngine
 
@@ -240,6 +262,16 @@ enum DragOutcome {
 - `DayView`, `TimelineView`, `MonthView`, `YearView`는 pointer/scope 이벤트를 모아 `DragSessionEngine`에 전달한다.
 - 엔진은 `DragSessionContext`, `DragState`, 파생 `droppable`, overlay frame, drop candidate를 계산한다.
 - Swift 구현 전에 동일한 규칙을 Python `draglab`에서 먼저 검증한다.
+
+## CalendarDragCoordinator
+
+`CalendarDragCoordinator`는 SwiftUI glue layer다.
+
+- `ContentView`가 단일 인스턴스를 소유한다.
+- `viewModel.scope` 변경을 감지해 엔진에 새 scope를 전달한다.
+- timeline frame과 month/year 날짜 셀 frame registry를 유지한다.
+- root overlay 렌더링에 필요한 `overlaySnapshot`을 제공한다.
+- EventKit write는 최종 drop 확정 시에만 호출하고, 계산 로직은 여전히 엔진/geometry에 둔다.
 
 ## Swift / Python 공통 계약
 
@@ -272,6 +304,12 @@ Swift와 Python은 아래 계산 기준을 공유한다.
 - 병렬화 단위는 `config` 또는 `session chunk`
 - nested pool 금지
 - deterministic seed 유지
+
+## 테스트 전략
+
+- `ticTests`를 추가해 `DragSessionEngine`, geometry, hover hit-test 같은 순수 로직을 XCTest로 검증한다.
+- mock-heavy UI 테스트는 만들지 않는다.
+- SwiftUI View는 coordinator/engine integration 수준까지만 빌드 검증한다.
 
 ## 타임라인 레이아웃 알고리즘
 column-packing: 시작 시간 정렬 → 충돌 클러스터 그룹화 → 탐욕적 열 할당 → 너비 균등 분할. 뷰 body 바깥에서 `LayoutAttributes` 미리 계산, 날짜별 캐시.
