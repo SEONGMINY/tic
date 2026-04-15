@@ -1,0 +1,29 @@
+{
+  "project": "tic",
+  "task": "interaction-completion",
+  "prompt": "[$orchestrate-task-phases](/Users/leesm/work/side/tic/.codex/skills/orchestrate-task-phases/SKILL.md)진행해줘.\nrun-phases-codex.py 파일 사용하면 돼. 스킬 업데이트 했어",
+  "totalPhases": 4,
+  "created_at": "2026-04-16T02:28:46+0900",
+  "phases": [
+    {
+      "phase": 0,
+      "name": "docs-alignment",
+      "status": "pending"
+    },
+    {
+      "phase": 1,
+      "name": "scope-gesture-bridge",
+      "status": "pending"
+    },
+    {
+      "phase": 2,
+      "name": "root-path-cleanup",
+      "status": "pending"
+    },
+    {
+      "phase": 3,
+      "name": "session-stability",
+      "status": "pending"
+    }
+  ]
+}
