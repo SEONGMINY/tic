@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "longPressMinMs": 500,
+  "pressSlopPt": 10,
+  "dragStartMinDistancePt": 6,
+  "hoverActivationMs": 120,
+  "hoverExitMs": 80,
+  "cellHitInsetPt": 6,
+  "cellHysteresisPt": 12,
+  "timelineDropInsetPt": 8,
+  "minuteSnapStep": 15,
+  "minimumDurationMinute": 30,
+  "restoreAnimationMs": 220,
+  "reanchorBlendMs": 140,
+  "invalidDropPolicy": "restore"
+}

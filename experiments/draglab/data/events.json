@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "sessions": [
+    {
+      "sessionId": "s001",
+      "events": [
+        { "tsMs": 0, "type": "touch_start", "global": { "x": 188, "y": 382 }, "target": { "kind": "timeline_block", "itemId": "evt_1", "part": "body" } },
+        { "tsMs": 520, "type": "long_press_recognized" },
+        { "tsMs": 560, "type": "drag_start", "global": { "x": 190, "y": 384 } },
+        { "tsMs": 640, "type": "drag_move", "global": { "x": 194, "y": 412 } },
+        { "tsMs": 720, "type": "drop", "global": { "x": 194, "y": 412 } }
+      ]
+    },
+    {
+      "sessionId": "s002",
+      "events": [
+        { "tsMs": 0, "type": "touch_start", "global": { "x": 188, "y": 412 }, "target": { "kind": "timeline_block", "itemId": "evt_2", "part": "body" } },
+        { "tsMs": 510, "type": "long_press_recognized" },
+        { "tsMs": 548, "type": "drag_start", "global": { "x": 188, "y": 412 } },
+        { "tsMs": 700, "type": "drag_move", "global": { "x": 184, "y": 334 } },
+        { "tsMs": 780, "type": "calendar_mode_enter", "from": "day", "to": "month" },
+        { "tsMs": 900, "type": "drag_move", "global": { "x": 96, "y": 298 } },
+        { "tsMs": 1040, "type": "hover_date", "scope": "month", "date": "2026-04-20" },
+        { "tsMs": 1180, "type": "drop", "global": { "x": 96, "y": 298 } }
+      ]
+    },
+    {
+      "sessionId": "s003",
+      "events": [
+        { "tsMs": 0, "type": "touch_start", "global": { "x": 190, "y": 350 }, "target": { "kind": "timeline_block", "itemId": "evt_3", "part": "body" } },
+        { "tsMs": 120, "type": "drag_move", "global": { "x": 230, "y": 320 } },
+        { "tsMs": 220, "type": "cancel" }
+      ]
+    },
+    {
+      "sessionId": "s004",
+      "events": [
+        { "tsMs": 0, "type": "touch_start", "global": { "x": 190, "y": 490 }, "target": { "kind": "timeline_block", "itemId": "evt_4", "part": "body" } },
+        { "tsMs": 500, "type": "long_press_recognized" },
+        { "tsMs": 550, "type": "drag_start", "global": { "x": 190, "y": 490 } },
+        { "tsMs": 690, "type": "calendar_mode_enter", "from": "day", "to": "month" },
+        { "tsMs": 830, "type": "drag_move", "global": { "x": 360, "y": 120 } },
+        { "tsMs": 950, "type": "drop", "global": { "x": 360, "y": 120 } }
+      ]
+    },
+    {
+      "sessionId": "s005",
+      "events": [
+        { "tsMs": 0, "type": "touch_start", "global": { "x": 190, "y": 560 }, "target": { "kind": "timeline_block", "itemId": "evt_5", "part": "body" } },
+        { "tsMs": 505, "type": "long_press_recognized" },
+        { "tsMs": 560, "type": "drag_start", "global": { "x": 190, "y": 560 } },
+        { "tsMs": 720, "type": "calendar_mode_enter", "from": "day", "to": "month" },
+        { "tsMs": 780, "type": "drag_move", "global": { "x": 232, "y": 300 } },
+        { "tsMs": 830, "type": "hover_date", "scope": "month", "date": "2026-04-23" },
+        { "tsMs": 870, "type": "drag_move", "global": { "x": 282, "y": 300 } },
+        { "tsMs": 900, "type": "hover_date", "scope": "month", "date": "2026-04-24" },
+        { "tsMs": 960, "type": "drop", "global": { "x": 282, "y": 300 } }
+      ]
+    },
+    {
+      "sessionId": "s006",
+      "events": [
+        { "tsMs": 0, "type": "touch_start", "global": { "x": 188, "y": 650 }, "target": { "kind": "timeline_block", "itemId": "evt_6", "part": "body" } },
+        { "tsMs": 500, "type": "long_press_recognized" },
+        { "tsMs": 550, "type": "drag_start", "global": { "x": 188, "y": 650 } },
+        { "tsMs": 710, "type": "calendar_mode_enter", "from": "day", "to": "year" },
+        { "tsMs": 860, "type": "drag_move", "global": { "x": 64, "y": 286 } },
+        { "tsMs": 980, "type": "cancel" }
+      ]
+    }
+  ]
+}

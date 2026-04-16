@@ -13,6 +13,7 @@ struct DayView: View {
     var eventKitService: EventKitService
     var eventFormViewModel: EventFormViewModel
     var notificationService: NotificationService
+    var dragCoordinator: CalendarDragCoordinator
     var onEditItem: (TicItem) -> Void
 
     @State private var showActionSheet = false
@@ -32,12 +33,6 @@ struct DayView: View {
     @State private var showEditToolbar: Bool = true
     @State private var isEditingGestureActive: Bool = false
     @State private var pendingEditingDates: PendingEditingDates?
-
-    // Edge hover state (cross-day)
-    @State private var edgeHoverDirection: Edge?
-    @State private var edgeHoverItemId: String?
-    @State private var edgeHoverTimer: Timer?
-    @State private var edgeHoverProgress: CGFloat = 0
 
     @Namespace private var dayAnimation
 
@@ -75,6 +70,45 @@ struct DayView: View {
         return items.sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }
 
+    private var timelineLayoutAttributes: [String: LayoutAttributes] {
+        dayViewModel.computeLayout(
+            for: effectiveTimedItems,
+            containerWidth: UIScreen.main.bounds.width - 60
+        )
+    }
+
+    @ViewBuilder
+    private var timelineSection: some View {
+        VStack(spacing: 0) {
+            if !dayViewModel.allDayItems.isEmpty {
+                allDaySection
+            }
+
+            timelineView
+        }
+    }
+
+    private var timelineView: some View {
+        TimelineView(
+            timedItems: effectiveTimedItems,
+            layout: timelineLayoutAttributes,
+            selectedDate: viewModel.selectedDate,
+            phantomBlock: phantomBlock,
+            dragCoordinator: dragCoordinator,
+            onEventTap: { onEditItem($0) },
+            onTimeSlotLongPress: handleTimeSlotLongPress,
+            onDeleteItem: handleDeleteRequest,
+            onCompleteItem: handleComplete,
+            onTimelineLayoutChange: handleTimelineLayoutChange,
+            editingItemId: $editingItemId,
+            showEditToolbar: $showEditToolbar,
+            isEditingGestureActive: $isEditingGestureActive,
+            onResizeItem: commitMovedItem,
+            onMoveItem: commitMovedItem,
+            onDuplicateItem: handleDuplicate
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // 주간 스트립 (탭 + 스와이프)
@@ -91,86 +125,7 @@ struct DayView: View {
 
             // 타임라인 영역
             ZStack(alignment: .bottomTrailing) {
-                VStack(spacing: 0) {
-                    if !dayViewModel.allDayItems.isEmpty {
-                        allDaySection
-                    }
-
-                    TimelineView(
-                        timedItems: effectiveTimedItems,
-                        layout: dayViewModel.computeLayout(
-                            for: effectiveTimedItems,
-                            containerWidth: UIScreen.main.bounds.width - 60
-                        ),
-                        selectedDate: viewModel.selectedDate,
-                        phantomBlock: phantomBlock,
-                        onEventTap: { item in onEditItem(item) },
-                        onTimeSlotLongPress: { date in
-                            let calendar = Calendar.current
-                            let hour = calendar.component(.hour, from: date)
-                            let minute = calendar.component(.minute, from: date)
-                            phantomBlock = PhantomBlockInfo(hour: hour, minute: minute)
-                            createDate = date
-                            eventFormViewModel.prepareForCreate(at: date)
-                            showCreateSheet = true
-                        },
-                        onDeleteItem: { item in
-                            itemToDelete = item
-                            showDeleteAlert = true
-                        },
-                        onCompleteItem: { item in
-                            try? eventKitService.complete(item)
-                        },
-                        editingItemId: $editingItemId,
-                        showEditToolbar: $showEditToolbar,
-                        isEditingGestureActive: $isEditingGestureActive,
-                        onResizeItem: { itemId, newStart, newEnd in
-                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
-                                do {
-                                    try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        pendingEditingDates = PendingEditingDates(
-                                            itemId: itemId,
-                                            item: item,
-                                            start: newStart,
-                                            end: newEnd
-                                        )
-                                    }
-                                } catch {
-                                    pendingEditingDates = nil
-                                }
-                            }
-                        },
-                        onMoveItem: { itemId, newStart, newEnd in
-                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
-                                do {
-                                    try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        pendingEditingDates = PendingEditingDates(
-                                            itemId: itemId,
-                                            item: item,
-                                            start: newStart,
-                                            end: newEnd
-                                        )
-                                    }
-                                } catch {
-                                    pendingEditingDates = nil
-                                }
-                            }
-                        },
-                        onDuplicateItem: { itemId in
-                            if let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) {
-                                try? eventKitService.duplicate(item)
-                            }
-                        },
-                        onEdgeHover: { item, direction in
-                            startEdgeHover(item: item, direction: direction)
-                        },
-                        onEdgeClear: {
-                            cancelEdgeHover()
-                        }
-                    )
-                }
+                timelineSection
                 .id(contentId)
                 .transition(.asymmetric(
                     insertion: .move(edge: slideDirection),
@@ -205,14 +160,13 @@ struct DayView: View {
                     fabButton
                 }
             }
-            .overlay {
-                edgeHoverIndicator
-            }
         }
         .task {
+            dragCoordinator.updateVisibleDay(viewModel.selectedDate)
             await refreshDayItems()
         }
         .onChange(of: viewModel.selectedDate) { _, _ in
+            dragCoordinator.updateVisibleDay(viewModel.selectedDate)
             Task {
                 await refreshDayItems()
             }
@@ -221,6 +175,9 @@ struct DayView: View {
             Task {
                 await refreshDayItems()
             }
+        }
+        .onChange(of: dragCoordinator.sessionTerminationCount) { _, _ in
+            handleSessionTermination()
         }
         .sheet(isPresented: $showActionSheet) {
             ActionListSheet(
@@ -262,6 +219,59 @@ struct DayView: View {
         } message: {
             Text("Apple Calendar/Reminders에서도 삭제됩니다.")
         }
+    }
+
+    private func handleTimeSlotLongPress(_ date: Date) {
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: date)
+        let minute = calendar.component(.minute, from: date)
+        phantomBlock = PhantomBlockInfo(hour: hour, minute: minute)
+        createDate = date
+        eventFormViewModel.prepareForCreate(at: date)
+        showCreateSheet = true
+    }
+
+    private func handleDeleteRequest(_ item: TicItem) {
+        itemToDelete = item
+        showDeleteAlert = true
+    }
+
+    private func handleComplete(_ item: TicItem) {
+        try? eventKitService.complete(item)
+    }
+
+    private func commitMovedItem(_ itemId: String, _ newStart: Date, _ newEnd: Date) {
+        guard let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) else {
+            return
+        }
+
+        do {
+            try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
+            withAnimation(.easeInOut(duration: 0.18)) {
+                pendingEditingDates = PendingEditingDates(
+                    itemId: itemId,
+                    item: item,
+                    start: newStart,
+                    end: newEnd
+                )
+            }
+        } catch {
+            pendingEditingDates = nil
+        }
+    }
+
+    private func handleTimelineLayoutChange(_ frameGlobal: CGRect, _ scrollOffsetY: CGFloat) {
+        dragCoordinator.updateTimelineLayout(
+            frameGlobal: frameGlobal,
+            scrollOffsetY: scrollOffsetY
+        )
+    }
+
+    private func handleDuplicate(_ itemId: String) {
+        guard let item = dayViewModel.timedItems.first(where: { $0.id == itemId }) else {
+            return
+        }
+        try? eventKitService.duplicate(item)
     }
 
     // MARK: - FAB
@@ -401,90 +411,6 @@ struct DayView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Edge Hover (Cross-Day Move)
-
-    private func startEdgeHover(item: TicItem, direction: Edge) {
-        if edgeHoverTimer != nil, edgeHoverItemId == item.id, edgeHoverDirection == direction {
-            return
-        }
-
-        cancelEdgeHover()
-        edgeHoverItemId = item.id
-        edgeHoverDirection = direction
-        edgeHoverProgress = 0
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-
-        // Animate progress bar over 1 second
-        withAnimation(.linear(duration: 1.0)) {
-            edgeHoverProgress = 1.0
-        }
-
-        // After 1 second: perform transition
-        edgeHoverTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [self] _ in
-            DispatchQueue.main.async {
-                performEdgeTransition()
-            }
-        }
-    }
-
-    private func cancelEdgeHover() {
-        edgeHoverTimer?.invalidate()
-        edgeHoverTimer = nil
-        edgeHoverItemId = nil
-        withAnimation(.easeOut(duration: 0.15)) {
-            edgeHoverDirection = nil
-            edgeHoverProgress = 0
-        }
-    }
-
-    private func performEdgeTransition() {
-        guard let itemId = edgeHoverItemId,
-              let direction = edgeHoverDirection,
-              let item = currentEditingItem(for: itemId),
-              let start = item.startDate,
-              let end = item.endDate else {
-            cancelEdgeHover()
-            return
-        }
-
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-
-        let dayDelta = direction == .leading ? -1 : 1
-        let newDate = viewModel.selectedDate.adding(days: dayDelta)
-
-        // Move item to new date at same time
-        let calendar = Calendar.current
-        let duration = end.timeIntervalSince(start)
-        var components = calendar.dateComponents([.year, .month, .day], from: newDate)
-        components.hour = calendar.component(.hour, from: start)
-        components.minute = calendar.component(.minute, from: start)
-
-        if let newStart = calendar.date(from: components) {
-            let newEnd = newStart.addingTimeInterval(duration)
-            do {
-                try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
-                pendingEditingDates = PendingEditingDates(
-                    itemId: item.id,
-                    item: item,
-                    start: newStart,
-                    end: newEnd
-                )
-            } catch {
-                cancelEdgeHover()
-                return
-            }
-        }
-
-        // Navigate to new date
-        slideDirection = direction == .leading ? .leading : .trailing
-        withAnimation(.easeInOut(duration: 0.25)) {
-            viewModel.selectedDate = newDate
-        }
-
-        showEditToolbar = false
-        cancelEdgeHover()
-    }
-
     private func refreshDayItems() async {
         await dayViewModel.loadItems(for: viewModel.selectedDate, service: eventKitService)
         resolvePendingEditingDates()
@@ -502,82 +428,15 @@ struct DayView: View {
         }
     }
 
-    private func currentEditingItem(for itemId: String) -> TicItem? {
-        if let pendingEditingDates, pendingEditingDates.itemId == itemId {
-            return pendingEditingDates.item.updatingDates(
-                startDate: pendingEditingDates.start,
-                endDate: pendingEditingDates.end
-            )
+    private func handleSessionTermination() {
+        guard let termination = dragCoordinator.lastSessionTermination,
+              termination.clearsEditingState else {
+            return
         }
 
-        return dayViewModel.timedItems.first(where: { $0.id == itemId })
-    }
-
-    @ViewBuilder
-    private var edgeHoverIndicator: some View {
-        if let direction = edgeHoverDirection {
-            let isLeading = direction == .leading
-            let targetDate = viewModel.selectedDate.adding(days: isLeading ? -1 : 1)
-            let dateText = formatEdgeDate(targetDate)
-
-            HStack {
-                if !isLeading { Spacer() }
-
-                VStack(spacing: 6) {
-                    Spacer()
-                    HStack(spacing: 4) {
-                        if isLeading {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        Text(dateText)
-                            .font(.system(size: 12, weight: .semibold))
-                        if !isLeading {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background {
-                        Capsule()
-                            .fill(.orange)
-                            .overlay(alignment: .bottom) {
-                                // Progress bar
-                                GeometryReader { geo in
-                                    Capsule()
-                                        .fill(.white.opacity(0.3))
-                                        .frame(width: geo.size.width * edgeHoverProgress, height: 3)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                                }
-                            }
-                            .clipShape(Capsule())
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 4)
-                .frame(width: 44)
-                .background(
-                    LinearGradient(
-                        colors: [.orange.opacity(0.25), .clear],
-                        startPoint: isLeading ? .leading : .trailing,
-                        endPoint: isLeading ? .trailing : .leading
-                    )
-                )
-
-                if isLeading { Spacer() }
-            }
-            .allowsHitTesting(false)
-            .transition(.opacity)
-        }
-    }
-
-    private func formatEdgeDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ko_KR")
-        formatter.dateFormat = "M/d"
-        return formatter.string(from: date)
+        editingItemId = nil
+        showEditToolbar = false
+        isEditingGestureActive = false
     }
 
     // MARK: - Helpers

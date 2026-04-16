@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var notificationService = NotificationService()
     @State private var eventFormViewModel = EventFormViewModel()
     @State private var liveActivityService = LiveActivityService()
+    @State private var dragCoordinator = CalendarDragCoordinator()
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showEventForm = false
@@ -28,7 +29,28 @@ struct ContentView: View {
             scopeView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
+                .contentShape(Rectangle())
+                .simultaneousGesture(scopePinchGesture, including: .all)
                 .animation(.spring(duration: 0.35, bounce: 0.05), value: viewModel.scope)
+        }
+        .simultaneousGesture(rootDragGesture, including: .all)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear {
+                        dragCoordinator.updateRootFrame(proxy.frame(in: .global))
+                    }
+                    .onChange(of: proxy.frame(in: .global)) { _, newValue in
+                        dragCoordinator.updateRootFrame(newValue)
+                    }
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let overlayItem = dragCoordinator.overlayItem,
+               let overlayFrame = dragCoordinator.overlayFrameLocal {
+                DragSessionOverlayBlock(item: overlayItem, frame: overlayFrame)
+                    .zIndex(10)
+            }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(eventKitService: eventKitService)
@@ -56,16 +78,22 @@ struct ContentView: View {
             await eventKitService.requestReminderAccess()
             eventKitService.startObservingChanges()
             applyCalendarSelections()
+            dragCoordinator.updateVisibleScope(viewModel.scope)
             // 첫 실행 시 Live Activity 체크
             await checkLiveActivity()
         }
         .onChange(of: calendarSelections.map(\.isEnabled)) {
             applyCalendarSelections()
         }
+        .onChange(of: viewModel.scope) { _, newScope in
+            dragCoordinator.updateVisibleScope(newScope)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 // 포그라운드 복귀 시 Live Activity 체크
                 Task { await checkLiveActivity() }
+            } else if dragCoordinator.hasActiveSession {
+                dragCoordinator.cancelDrag()
             }
         }
         .onReceive(liveActivityTimer) { _ in
@@ -102,9 +130,7 @@ struct ContentView: View {
             }
         case .month:
             Button {
-                withAnimation(.spring(duration: 0.4, bounce: 0.05)) {
-                    viewModel.scope = .year
-                }
+                applyScopeTransition(.pinchOut)
             } label: {
                 HStack(spacing: 2) {
                     Image(systemName: "chevron.left")
@@ -116,9 +142,7 @@ struct ContentView: View {
             }
         case .day:
             Button {
-                withAnimation(.spring(duration: 0.4, bounce: 0.05)) {
-                    viewModel.scope = .month
-                }
+                applyScopeTransition(.pinchOut)
             } label: {
                 HStack(spacing: 2) {
                     Image(systemName: "chevron.left")
@@ -167,10 +191,18 @@ struct ContentView: View {
     private var scopeView: some View {
         switch viewModel.scope {
         case .year:
-            YearView(viewModel: viewModel, eventKitService: eventKitService)
+            YearView(
+                viewModel: viewModel,
+                eventKitService: eventKitService,
+                dragCoordinator: dragCoordinator
+            )
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
         case .month:
-            MonthView(viewModel: viewModel, eventKitService: eventKitService)
+            MonthView(
+                viewModel: viewModel,
+                eventKitService: eventKitService,
+                dragCoordinator: dragCoordinator
+            )
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
         case .day:
             DayView(
@@ -179,12 +211,55 @@ struct ContentView: View {
                 eventKitService: eventKitService,
                 eventFormViewModel: eventFormViewModel,
                 notificationService: notificationService,
+                dragCoordinator: dragCoordinator,
                 onEditItem: { item in
                     eventFormViewModel.prepareForEdit(item, service: eventKitService)
                     showEventForm = true
                 }
             )
             .transition(.opacity.combined(with: .scale(scale: 1.02)))
+        }
+    }
+
+    private var rootDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .global)
+            .onChanged { value in
+                guard dragCoordinator.shouldHandleDragGlobally else { return }
+                dragCoordinator.updateGlobalDrag(pointerGlobal: value.location)
+            }
+            .onEnded { _ in
+                guard dragCoordinator.shouldHandleDragGlobally else { return }
+                guard let item = dragCoordinator.sessionItem else {
+                    dragCoordinator.cancelDrag()
+                    return
+                }
+                guard let commit = dragCoordinator.completeGlobalDrag() else { return }
+                applyGlobalDragCommit(item, commit: commit)
+            }
+    }
+
+    private var scopePinchGesture: some Gesture {
+        // Product spec uses "pinch in" for detail scope and "pinch out" for broader scope.
+        MagnifyGesture(minimumScaleDelta: 0.08)
+            .onEnded { value in
+                if value.magnification > 1 {
+                    applyScopeTransition(.pinchIn)
+                } else if value.magnification < 1 {
+                    applyScopeTransition(.pinchOut)
+                }
+            }
+    }
+
+    private func applyScopeTransition(_ direction: CalendarScopePinchDirection) {
+        guard let nextState = CalendarScopeTransition.nextState(
+            from: viewModel.scopeTransitionState,
+            pinch: direction
+        ) else {
+            return
+        }
+
+        withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
+            viewModel.applyScopeTransitionState(nextState)
         }
     }
 
@@ -228,5 +303,21 @@ struct ContentView: View {
         // 캐시 무효화하여 즉시 반영
         eventKitService.invalidateMonthCache()
         eventKitService.lastChangeDate = Date()
+    }
+
+    private func applyGlobalDragCommit(
+        _ item: TicItem,
+        commit: DragSessionCommit
+    ) {
+        do {
+            try eventKitService.moveToDate(item, newStart: commit.start, newEnd: commit.end)
+            let nextState = CalendarScopeTransition.stateAfterGlobalDrop(commit: commit)
+
+            withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
+                viewModel.applyScopeTransitionState(nextState)
+            }
+        } catch {
+            eventKitService.lastChangeDate = Date()
+        }
     }
 }
