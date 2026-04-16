@@ -1,0 +1,34 @@
+{
+  "project": "tic",
+  "task": "timeline-block-animation",
+  "prompt": "[$orchestrate-task-phases](/Users/leesm/work/side/tic/.codex/skills/orchestrate-task-phases/SKILL.md)\n\n캘린더 앱의 타임라인 블록 사용성을 개선하기 위해 타임블록 애니메이션을 추가 및 고도화하려고 한다. `videos/block-animation.MP4`와 `videos/animation.json`을 기준으로 업데이트 모드 진입, 타임블록 드래그/이동, 년/월 캘린더 전환, 날짜 이동 후 복귀 또는 drop까지 이어지는 흐름을 자연스럽게 설계하고 구현한다. 특히 상태 전이 정의, 모션 해석, SwiftUI 구현 구조, 최소 버전과 고도화 버전을 실제 코드에 반영 가능한 수준으로 정리한다.",
+  "totalPhases": 5,
+  "created_at": "2026-04-16T14:33:39+0900",
+  "phases": [
+    {
+      "phase": 0,
+      "name": "docs-animation-contract",
+      "status": "pending"
+    },
+    {
+      "phase": 1,
+      "name": "overlay-visual-phase",
+      "status": "pending"
+    },
+    {
+      "phase": 2,
+      "name": "timeline-lift-and-float",
+      "status": "pending"
+    },
+    {
+      "phase": 3,
+      "name": "scope-transition-and-pill",
+      "status": "pending"
+    },
+    {
+      "phase": 4,
+      "name": "landing-restore-and-performance",
+      "status": "pending"
+    }
+  ]
+}
