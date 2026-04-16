@@ -8,7 +8,8 @@
     {
       "phase": 0,
       "name": "docs-animation-contract",
-      "status": "pending"
+      "status": "pending",
+      "started_at": "2026-04-16T14:40:13+0900"
     },
     {
       "phase": 1,
