@@ -171,6 +171,13 @@ phantomBlock: PhantomBlock?
 
 단, cross-scope drag가 커지면 View의 임시 상태만으로는 상태 전이 규칙을 안전하게 유지하기 어렵다. 그래서 SwiftUI View가 모든 제스처 로직을 직접 품는 대신, 순수 로직을 담는 `DragSessionEngine` 계층을 별도로 둔다.
 
+여기서 제스처 상태와 표시 상태는 분리한다.
+
+- gesture state: pointer 위치, finger anchor, hover hit-test 입력
+- display state: `timelineCard`/`calendarPill`, opacity, shadow, scale, restore/landing phase
+
+display state는 raw gesture 분기에서 직접 결정하지 않고, coordinator 또는 인접 순수 helper가 계산한 presentation phase를 따른다.
+
 ```swift
 @Observable
 final class CalendarDragCoordinator {
@@ -186,6 +193,10 @@ final class CalendarDragCoordinator {
 - `DayView`, `MonthView`, `YearView`는 owner가 아니라 geometry/frame reporting 역할만 가진다.
 - `DayView`의 legacy `edge-hover` timer/indicator 상태는 제거 대상이다.
 - scope가 바뀌어도 coordinator와 overlay는 유지된다.
+- coordinator 또는 인접 순수 helper가 `idle`, `liftPreparing`, `floatingTimeline`, `transitionHoldingCard`, `floatingCalendarPill`, `returningToTimeline`, `dropping`, `restoring` 같은 presentation phase를 계산한다.
+- `DragSessionOverlayBlock`은 raw gesture 분기 대신 이 presentation model을 입력받는다.
+- 실제 이동 중 블록은 항상 하나의 `single overlay`만 유지한다.
+- month/year 강조는 항상 하나의 `single active target`만 유지한다.
 
 ## z-index / 제스처 우선순위
 
@@ -238,6 +249,11 @@ struct DragSessionContext {
 - `pinch scope transition`은 `ContentView`가 owner인 bridge를 통해 같은 session 위에서 처리한다.
 - 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로만 렌더링한다.
 - `EditableEventBlock`은 local move completion owner가 아니라 pointer forwarding 역할만 가진다.
+- drag 중 실시간 추적은 per-frame animation이 아니라 직접 position 업데이트로 처리한다.
+- 상태 전환 애니메이션만 명시적으로 `withAnimation` 또는 spring을 사용한다.
+- `matchedGeometryEffect`는 cross-scope 전체를 억지로 묶는 용도가 아니라, landing 또는 restore 같은 bounded transition에서만 제한적으로 검토한다.
+- month/year에서는 `selectedDate`를 즉시 바꾸지 않고 `activeDate`만 hover candidate로 유지한다.
+- 최종 확정은 `drop on touch up`만 허용한다.
 - `droppable`은 독립 top-level state가 아니라, current state + candidate 유효성에서 계산되는 파생 판정이다.
 - invalid drop, overflow, missing candidate는 clamp보다 `restore`를 우선한다.
 - overlay와 날짜 셀 hit-test는 모두 `global coordinates`를 기준으로 계산한다.

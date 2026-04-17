@@ -28,11 +28,15 @@
  drag session 중:
   pinch scope transition으로 day/year scope 전환 가능
   `CalendarDragCoordinator` session을 유지한 채 scope만 교체
-  overlay는 root scope 위에서 계속 유지
-  각 날짜 셀 hover → activeDate 갱신
+  lift 이후 overlay는 root scope 위에서 계속 유지되는 `single overlay`
+  scope 전환 중에도 같은 블록을 계속 조작한다고 느껴야 함
+  각 날짜 셀 hover → `activeDate`만 갱신, `selectedDate`는 즉시 바뀌지 않음
+  날짜 강조는 항상 하나의 `single active target`만 유지
   날짜 셀 판정은 global coordinates 기준 hit-test
-  drop 시 activeDate + minuteCandidate로 최종 확정
-  month drop 성공 시 결과 날짜 기준으로 day scope로 복귀
+  drop은 `drop on touch up`으로만 확정
+  valid drop 시 `activeDate + minuteCandidate`로 최종 확정
+  month drop 성공 시 결과 날짜 기준으로 day scope로 복귀한 뒤 commit
+  invalid drop / cancel은 `restore-first policy`로 원위치 복원
 ```
 
 ## F3: 일간 뷰
@@ -85,13 +89,16 @@
   꼭짓점 드래그 → 리사이즈 (15분 스냅, 최소 30분)
   블록 본체 y축 드래그 → 같은 날 이동 (15분 스냅, 자동 스크롤)
   블록 본체 이동은 단일 root drag path로만 처리
+  drag 시작 직후 `liftPreparing` 단계에서 블록이 붙어 있는 요소에서 떠다니는 조작 대상으로 바뀜
   drag session 중 pinch scope transition으로 day/month/year scope 전환 가능
-  drag session 중 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로 유지
+  drag session 중 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 `single overlay`로 유지
   overlay owner는 DayView가 아니라 root `CalendarDragCoordinator`
   day timeline에서는 `dateCandidate`, `minuteCandidate`를 둘 다 갱신
-  month/year에서는 `activeDate`만 갱신하고 `minuteCandidate`는 drag session이 유지
-  drop 시 `dateCandidate + minuteCandidate + duration`으로 확정
-  month/year drop 성공 시 결과 날짜 기준으로 day scope로 복귀
+  month/year에서는 `selectedDate`를 유지한 채 `activeDate`만 갱신하고 `minuteCandidate`는 drag session이 유지
+  month/year의 이동 표현은 익명 `calendarPill`이며 같은 pill 길이를 유지
+  drop은 `drop on touch up` 한 번으로만 끝남
+  valid drop 시 `dateCandidate + minuteCandidate + duration`으로 확정
+  month/year drop 성공 시 결과 날짜 기준으로 day scope로 복귀한 뒤 commit
   삭제 탭 → 확인 alert → EventKit 삭제
   복제 탭 → 같은 시간에 즉시 배치 (반복 규칙 제외, sheet 없음)
 
@@ -99,7 +106,9 @@
   빈 영역 탭 → 편집 모드 완전 해제
   편집 블록 탭 → toolbar만 닫힘, 편집 모드 유지
   다른 블록 long press → 현재 해제 → 새 블록 편집 모드
-  invalid drop / overflow / hover 미확정 / cancel → restore 후 종료
+  성공 commit 시에만 편집 모드 종료
+  invalid drop / overflow / hover 미확정 / cancel → `restore-first policy`로 복원
+  cancel / invalid drop / restore에서는 편집 모드를 종료하지 않음
   legacy edge-hover timer 기반 인접 날짜 이동은 핵심 경로가 아니며 제거 대상
 
  비활성화:
@@ -171,11 +180,12 @@
  drag session 중:
   pinch scope transition으로 month scope 전환 가능
   `CalendarDragCoordinator` session을 유지한 채 scope만 교체
-  pointer가 날짜 셀 위에서 안정적으로 머물면 activeDate 갱신
-  overlay는 root scope 위에서 유지되고, scope 교체만으로는 종료되지 않음
-  drop은 activeDate가 있고 minuteCandidate가 유지된 경우에만 허용
-  year drop 성공 시 결과 날짜 기준으로 day scope로 복귀
-  invalid drop은 확정하지 않고 restore
+  pointer가 날짜 셀 위에서 안정적으로 머물면 `activeDate`만 갱신
+  overlay는 root scope 위의 `single overlay`로 유지되고, scope 교체만으로는 종료되지 않음
+  year scope에서는 익명 `calendarPill`과 `single active target`만 보임
+  drop은 `drop on touch up`이며 `activeDate`가 있고 minuteCandidate가 유지된 경우에만 허용
+  year drop 성공 시 결과 날짜 기준으로 day scope로 복귀한 뒤 commit
+  invalid drop / cancel은 `restore-first policy`로 복원
 ```
 
 ## F8: 설정

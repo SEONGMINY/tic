@@ -96,8 +96,9 @@ Baseline: `a1b2c3d`
 
 ### 4. `/tasks/{id}-{name}/phase{N}.md` (각 phase마다 1개)
 
-각 파일은 **독립적인 claude session이 이 파일 하나만 보고 작업을 완수할 수 있을 정도로** 자기완결적이어야 한다.
-phase 실행은 별도의 claude session이 진행한다는 점을 명심하라. 우리의 의도가 정확히 반영될 수 있도록 구체적이어야한다.
+각 파일은 해당 파일만 읽는 독립적인 **Codex 세션이 추가적인 컨텍스트 없이 작업을 완수할 수 있을 정도로 완전히 자기완결적**이어야 한다.
+모든 phase는 서로 다른 Codex 세션에서 실행된다고 가정한다.
+이전 대화나 공통 상태에 의존하지 않고, 우리의 의도가 정확히 반영되도록 명확하고 구체적으로 작성해야 한다.
 
 반드시 아래 구조를 따르라:
 
@@ -160,7 +161,8 @@ npm test # 모든 테스트 통과
 2. `tasks/{task-dir}/index.json`을 읽고, 다음 `"pending"` phase를 찾는다.
 3. 해당 `phase{N}.md`의 내용을 읽어 공통 프리앰블과 합쳐 프롬프트를 구성한다.
    - **프롬프트에 파일 경로를 넘기지 말고, 파일 내용 자체를 프롬프트에 임베딩한다.**
-4. `claude -p --dangerously-skip-permissions --output-format json "{prompt}"` 로 실행.
+4. `codex exec --dangerously-bypass-approvals-and-sandbox --json -` 로 실행한다.
+   - 프롬프트 문자열은 명령 인자가 아니라 stdin으로 전달한다.
 5. stdout/stderr를 `tasks/{task-dir}/phase{N}-output.json`에 저장.
 6. 실행 후 `{task-dir}/index.json`을 다시 읽어 status 확인:
    - `"completed"` → 다음 phase로 진행
@@ -202,7 +204,7 @@ python3 scripts/run-phases.py 0-mvp
 
 - `feat-{task-name}` 브랜치를 자동 생성/체크아웃 (이미 존재하면 resume)
 - 각 phase 완료 후 2단계 커밋:
-  1. **Claude fallback 커밋**: `feat({task-name}): phase {N} — {phase-name}` — Claude가 직접 커밋하지 않은 코드 변경이 있을 때만 수행
+  1. **fallback 커밋**: `feat({task-name}): phase {N} — {phase-name}` — Codex가 직접 커밋하지 않은 코드 변경이 있을 때만 수행
   2. **Runner housekeeping 커밋**: `chore({task-name}): phase {N} output + timestamps` — phase-output.json 저장 및 index.json timestamp 업데이트를 별도 커밋
   - 커밋 메시지 템플릿은 `scripts/run-phases.py`의 `COMMIT_MSG_TEMPLATE`, `RUNNER_COMMIT_MSG_TEMPLATE` 상수로 관리
 - 스피너 + 진행상황 표시 (현재 phase / 전체 phase / 경과시간)

@@ -8,28 +8,34 @@
     {
       "phase": 0,
       "name": "docs-animation-contract",
-      "status": "pending",
-      "started_at": "2026-04-16T14:40:13+0900"
+      "status": "completed",
+      "started_at": "2026-04-16T14:40:13+0900",
+      "completed_at": "2026-04-16T14:54:43+0900"
     },
     {
       "phase": 1,
       "name": "overlay-visual-phase",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-04-16T15:07:29+0900"
     },
     {
       "phase": 2,
       "name": "timeline-lift-and-float",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-04-16T15:07:29+0900"
     },
     {
       "phase": 3,
       "name": "scope-transition-and-pill",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-04-16T15:07:29+0900"
     },
     {
       "phase": 4,
       "name": "landing-restore-and-performance",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-04-16T15:07:29+0900"
     }
-  ]
+  ],
+  "completed_at": "2026-04-16T15:07:29+0900"
 }
