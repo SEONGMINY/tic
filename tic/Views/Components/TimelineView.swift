@@ -32,7 +32,7 @@ struct TimelineView: View {
     var onDeleteItem: (TicItem) -> Void
     var onCompleteItem: (TicItem) -> Void
     var onTimelineLayoutChange: (_ frameGlobal: CGRect, _ scrollOffsetY: CGFloat) -> Void
-    var onBeginMoveDrag: (_ item: TicItem, _ sourceFrameGlobal: CGRect, _ startPointerGlobal: CGPoint, _ currentPointerGlobal: CGPoint) -> Bool
+    var onBeginMoveDrag: (_ item: TicItem, _ sourceFrameGlobal: CGRect, _ startPointerGlobal: CGPoint, _ currentPointerGlobal: CGPoint) -> Void
 
     // Edit mode
     @Binding var editingItemId: String?
@@ -134,6 +134,7 @@ struct TimelineView: View {
                                 } else {
                                     EditableEventBlock(
                                         item: item,
+                                        dragCoordinator: dragCoordinator,
                                         bgColor: editBgColor,
                                         frameWidth: max(editWidth - 2, 0),
                                         baseYPos: baseYPos,
@@ -159,6 +160,9 @@ struct TimelineView: View {
                                             )
                                         },
                                         onMoveGestureChanged: { pointerGlobal in
+                                            guard dragCoordinator.currentHandoffOwner == .localPreview else {
+                                                return
+                                            }
                                             dragCoordinator.updateActiveDrag(pointerGlobal: pointerGlobal)
                                         }
                                     )

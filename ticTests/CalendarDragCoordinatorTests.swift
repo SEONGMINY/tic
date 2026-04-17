@@ -64,6 +64,26 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertNotNil(coordinator.sourcePlaceholderOpacity(for: item.id))
     }
 
+    func testRootOverlayStaysHiddenWhilePendingAndPromotesAfterClaimSuccess() {
+        let coordinator = makeCoordinator()
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+
+        XCTAssertFalse(coordinator.isRootOverlayVisible)
+        XCTAssertNil(coordinator.rootOverlayItem)
+        XCTAssertNil(coordinator.rootOverlayFrameLocal)
+        XCTAssertNotNil(coordinator.localPreviewFrameGlobal(for: item.id))
+
+        claimSuccess(coordinator)
+
+        XCTAssertTrue(coordinator.isRootOverlayVisible)
+        XCTAssertNotNil(coordinator.rootOverlayItem)
+        XCTAssertNotNil(coordinator.rootOverlayFrameLocal)
+        XCTAssertNil(coordinator.localPreviewFrameGlobal(for: item.id))
+    }
+
     func testSameDayDropStillCommitsThroughLocalPreviewWhileClaimPending() {
         let coordinator = makeCoordinator()
         let item = makeItem()
@@ -161,6 +181,8 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.handoffState.phase, .restoring)
         XCTAssertEqual(coordinator.handoffState.restoreReason, .timeout)
         XCTAssertEqual(coordinator.currentHandoffOwner, .localPreview)
+        XCTAssertFalse(coordinator.isRootOverlayVisible)
+        XCTAssertNotNil(coordinator.localPreviewFrameGlobal(for: "event-1"))
         XCTAssertFalse(coordinator.isShowingPlaceholder(for: "event-1"))
         XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .restoring)
 

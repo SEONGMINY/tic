@@ -6,6 +6,7 @@ private enum DragType {
 
 struct EditableEventBlock: View {
     let item: TicItem
+    let dragCoordinator: CalendarDragCoordinator
     let bgColor: Color
     let frameWidth: CGFloat
     let baseYPos: CGFloat
@@ -23,7 +24,7 @@ struct EditableEventBlock: View {
     var onResizeItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onMoveItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onDuplicateItem: (_ itemId: String) -> Void
-    var onMoveGestureBegan: ((_ sourceFrameGlobal: CGRect, _ startPointerGlobal: CGPoint, _ currentPointerGlobal: CGPoint) -> Bool)?
+    var onMoveGestureBegan: ((_ sourceFrameGlobal: CGRect, _ startPointerGlobal: CGPoint, _ currentPointerGlobal: CGPoint) -> Void)?
     var onMoveGestureChanged: ((_ pointerGlobal: CGPoint) -> Void)?
 
     @State private var activeDrag: DragType = .none
@@ -64,15 +65,36 @@ struct EditableEventBlock: View {
     private var usesExternalMoveSession: Bool {
         onMoveGestureBegan != nil && onMoveGestureChanged != nil
     }
+    private var localPreviewPresentation: DragOverlayPresentation {
+        dragCoordinator.overlayPresentation
+    }
+    private var localPreviewFrameGlobal: CGRect? {
+        dragCoordinator.localPreviewFrameGlobal(for: item.id)
+    }
+    private var showsLocalMovePreview: Bool {
+        localPreviewFrameGlobal != nil
+    }
+    private var localPreviewOffset: CGSize {
+        guard let localPreviewFrameGlobal else { return .zero }
+        return CGSize(
+            width: localPreviewFrameGlobal.minX - baseFrameGlobal.minX,
+            height: localPreviewFrameGlobal.minY - baseFrameGlobal.minY
+        )
+    }
 
     var body: some View {
         // Fixed-size container prevents layout recalculation jitter
         ZStack(alignment: .topLeading) {
             blockWithHandles
+                .opacity(showsLocalMovePreview ? 0.001 : 1)
                 .offset(x: xPos - handleInset, y: visualY - handleInset)
 
+            if showsLocalMovePreview {
+                localMovePreview
+            }
+
             // Toolbar
-            if showEditToolbar && activeDrag == .none {
+            if showEditToolbar && activeDrag == .none && showsLocalMovePreview == false {
                 toolbar
                     .position(x: toolbarX, y: toolbarYPos)
             }
@@ -107,6 +129,26 @@ struct EditableEventBlock: View {
             .contentShape(Rectangle())
             .highPriorityGesture(moveGesture)
             .onTapGesture { showEditToolbar = false }
+    }
+
+    private var localMovePreview: some View {
+        blockContent
+            .overlay {
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            }
+            .scaleEffect(localPreviewPresentation.overlayScale)
+            .opacity(localPreviewPresentation.overlayOpacity)
+            .shadow(
+                color: .black.opacity(localPreviewPresentation.shadowOpacity),
+                radius: localPreviewPresentation.shadowRadius,
+                y: localPreviewPresentation.shadowYOffset
+            )
+            .offset(
+                x: xPos + localPreviewOffset.width,
+                y: baseYPos + localPreviewOffset.height
+            )
+            .allowsHitTesting(false)
     }
 
     // MARK: - Block Content
@@ -265,15 +307,14 @@ struct EditableEventBlock: View {
 
         if dragType == .move, usesExternalMoveSession {
             if externalMoveSessionStarted == false {
-                externalMoveSessionStarted = onMoveGestureBegan?(
+                externalMoveSessionStarted = true
+                onMoveGestureBegan?(
                     baseFrameGlobal,
                     value.startLocation,
                     value.location
-                ) ?? false
+                )
             }
-            if externalMoveSessionStarted {
-                onMoveGestureChanged?(value.location)
-            }
+            onMoveGestureChanged?(value.location)
             return
         }
 

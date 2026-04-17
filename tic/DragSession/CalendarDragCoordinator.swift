@@ -115,6 +115,11 @@ final class CalendarDragCoordinator {
         )
     }
 
+    var rootOverlayItem: TicItem? {
+        guard isRootOverlayVisible else { return nil }
+        return overlayItem
+    }
+
     var overlayFrameLocal: CGRect? {
         guard let displayedOverlayFrameGlobal else { return nil }
         guard rootFrameGlobal != .zero else { return displayedOverlayFrameGlobal }
@@ -126,8 +131,24 @@ final class CalendarDragCoordinator {
         )
     }
 
+    var rootOverlayFrameLocal: CGRect? {
+        guard isRootOverlayVisible else { return nil }
+        return overlayFrameLocal
+    }
+
     var isSessionVisible: Bool {
         displayedOverlayFrameGlobal != nil && draggedItem != nil
+    }
+
+    var isRootOverlayVisible: Bool {
+        switch handoffState.phase {
+        case .rootClaimAcquired, .landing:
+            return true
+        case .restoring:
+            return currentHandoffOwner == .root
+        case .idle, .localPreview, .rootClaimPending:
+            return false
+        }
     }
 
     var snapshot: DragSessionSnapshot {
@@ -188,6 +209,16 @@ final class CalendarDragCoordinator {
             return nil
         }
         return overlayPresentation.sourcePlaceholderOpacity
+    }
+
+    func localPreviewFrameGlobal(for itemId: String?) -> CGRect? {
+        guard let itemId,
+              draggedItem?.id == itemId,
+              currentHandoffOwner == .localPreview,
+              handoffState.phase != .idle else {
+            return nil
+        }
+        return displayedOverlayFrameGlobal
     }
 
     func updateRootFrame(_ frameGlobal: CGRect) {
@@ -287,18 +318,19 @@ final class CalendarDragCoordinator {
         syncDisplayedOverlayFrame()
     }
 
+    @discardableResult
     func beginDayDrag(
         item: TicItem,
         sourceFrameGlobal: CGRect,
         pointerGlobal: CGPoint,
         claimTimestamp: DragTouchClaimTimestamp? = nil
-    ) {
+    ) -> DragTouchClaimToken? {
         startLocalPreviewDrag(
             item: item,
             sourceFrameGlobal: sourceFrameGlobal,
             pointerGlobal: pointerGlobal
         )
-        _ = requestRootClaim(at: claimTimestamp)
+        return requestRootClaim(at: claimTimestamp)
     }
 
     func startLocalPreviewDrag(
@@ -410,6 +442,12 @@ final class CalendarDragCoordinator {
         for token: DragTouchClaimToken
     ) -> DragTouchClaimEventResult {
         touchClaimHandoff.reportClaimEnded(for: token)
+    }
+
+    @discardableResult
+    func expirePendingRootClaimIfNeeded(
+    ) -> DragTouchClaimEventResult {
+        expirePendingRootClaimIfNeeded(at: nextClaimTimestamp())
     }
 
     @discardableResult

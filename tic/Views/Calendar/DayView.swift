@@ -15,7 +15,7 @@ struct DayView: View {
     var notificationService: NotificationService
     var dragCoordinator: CalendarDragCoordinator
     var onEditItem: (TicItem) -> Void
-    var onBeginMoveDrag: (TicItem, CGRect, CGPoint, CGPoint) -> Bool
+    var onBeginMoveDrag: (TicItem, CGRect, CGPoint, CGPoint) -> Void
 
     @State private var showActionSheet = false
     @State private var showDeleteAlert = false

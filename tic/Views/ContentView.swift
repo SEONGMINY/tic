@@ -13,11 +13,13 @@ struct ContentView: View {
     @State private var liveActivityService = LiveActivityService()
     @State private var dragCoordinator = CalendarDragCoordinator()
     @State private var rootTouchCapture = DragSessionTouchCaptureController()
+    @State private var rootClaimTimeoutWorkItem: DispatchWorkItem?
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showEventForm = false
     @Environment(\.scenePhase) private var scenePhase
     private let liveActivityTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let rootClaimTimeoutSeconds = 2.0 / 60.0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,22 +51,28 @@ struct ContentView: View {
         .background {
             DragSessionTouchCaptureBridge(
                 controller: rootTouchCapture,
+                onClaimSucceeded: { token in
+                    guard dragCoordinator.currentHandoffToken == token else { return }
+                    cancelRootClaimTimeout()
+                    _ = dragCoordinator.applyRootClaimSuccess(for: token)
+                },
                 onMove: { point in
-                    guard dragCoordinator.isGestureSessionActive else { return }
-                    dragCoordinator.updateActiveDrag(pointerGlobal: point)
+                    dragCoordinator.updateGlobalDrag(pointerGlobal: point)
                 },
-                onEnd: {
-                    handleCapturedDragEnded()
+                onEnd: { token in
+                    handleCapturedDragEnded(for: token)
                 },
-                onCancel: {
-                    guard dragCoordinator.hasActiveSession else { return }
-                    dragCoordinator.cancelDrag()
+                onCancel: { token in
+                    if dragCoordinator.currentHandoffToken == token {
+                        cancelRootClaimTimeout()
+                    }
+                    _ = dragCoordinator.applyRootClaimCancellation(for: token)
                 }
             )
         }
         .overlay(alignment: .topLeading) {
-            if let overlayItem = dragCoordinator.overlayItem,
-               let overlayFrame = dragCoordinator.overlayFrameLocal {
+            if let overlayItem = dragCoordinator.rootOverlayItem,
+               let overlayFrame = dragCoordinator.rootOverlayFrameLocal {
                 DragSessionOverlayBlock(
                     item: overlayItem,
                     frame: overlayFrame,
@@ -114,11 +122,13 @@ struct ContentView: View {
                 // 포그라운드 복귀 시 Live Activity 체크
                 Task { await checkLiveActivity() }
             } else if dragCoordinator.hasActiveSession {
+                cancelRootClaimTimeout()
                 dragCoordinator.cancelDrag()
                 rootTouchCapture.releaseTracking()
             }
         }
         .onChange(of: dragCoordinator.sessionTerminationCount) { _, _ in
+            cancelRootClaimTimeout()
             rootTouchCapture.releaseTracking()
         }
         .onReceive(liveActivityTimer) { _ in
@@ -342,38 +352,70 @@ struct ContentView: View {
         sourceFrameGlobal: CGRect,
         startPointerGlobal: CGPoint,
         currentPointerGlobal: CGPoint
-    ) -> Bool {
+    ) {
         if dragCoordinator.hasActiveSession {
-            return true
-        }
-        // The root coordinator must own the live finger before the source block yields to the overlay.
-        guard rootTouchCapture.captureTouch(near: currentPointerGlobal) else {
-            return false
+            return
         }
 
-        dragCoordinator.beginDayDrag(
+        guard let token = dragCoordinator.beginDayDrag(
             item: item,
             sourceFrameGlobal: sourceFrameGlobal,
             pointerGlobal: startPointerGlobal
-        )
-        dragCoordinator.updateActiveDrag(pointerGlobal: currentPointerGlobal)
-        return true
+        ) else {
+            return
+        }
+
+        scheduleRootClaimTimeout(for: token)
+        rootTouchCapture.requestClaim(for: token, near: currentPointerGlobal)
+
+        if dragCoordinator.currentHandoffOwner == .localPreview {
+            dragCoordinator.updateActiveDrag(pointerGlobal: currentPointerGlobal)
+        }
     }
 
-    private func handleCapturedDragEnded() {
+    private func handleCapturedDragEnded(for token: DragTouchClaimToken) {
+        guard dragCoordinator.currentHandoffToken == token else { return }
+        cancelRootClaimTimeout()
+
         guard let item = dragCoordinator.sessionItem else {
             dragCoordinator.cancelDrag()
             return
         }
 
         let commit: DragSessionCommit?
-        if dragCoordinator.snapshot.currentScope == .day {
-            commit = dragCoordinator.completeTimelineDrop()
-        } else {
+        if dragCoordinator.handoffState.isRootClaimAcquired {
             commit = dragCoordinator.completeGlobalDrag()
+        } else if dragCoordinator.shouldHandleDropLocally {
+            commit = dragCoordinator.completeLocalDrag()
+        } else {
+            dragCoordinator.cancelDrag()
+            return
         }
 
         guard let commit else { return }
         applyGlobalDragCommit(item, commit: commit)
+    }
+
+    private func scheduleRootClaimTimeout(for token: DragTouchClaimToken) {
+        cancelRootClaimTimeout()
+
+        let workItem = DispatchWorkItem { [token] in
+            guard dragCoordinator.currentHandoffToken == token else { return }
+            let result = dragCoordinator.expirePendingRootClaimIfNeeded()
+            if result == .applied {
+                rootTouchCapture.releaseTracking()
+            }
+        }
+
+        rootClaimTimeoutWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + rootClaimTimeoutSeconds,
+            execute: workItem
+        )
+    }
+
+    private func cancelRootClaimTimeout() {
+        rootClaimTimeoutWorkItem?.cancel()
+        rootClaimTimeoutWorkItem = nil
     }
 }
