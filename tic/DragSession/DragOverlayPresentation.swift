@@ -191,6 +191,19 @@ enum DragOverlayPresentationResolver {
     }
 }
 
+enum DragCalendarPillAnimationPolicy {
+    static func shouldAnimateFrameChange(
+        style: DragOverlayStyle,
+        scope: DragSessionScope,
+        previousActiveDate: Date?,
+        nextActiveDate: Date?
+    ) -> Bool {
+        guard style == .calendarPill else { return false }
+        guard scope != .day else { return false }
+        return previousActiveDate != nextActiveDate
+    }
+}
+
 struct DragCalendarHoverPolicy: Equatable {
     var cellHitInset: CGFloat
     var cellHysteresis: CGFloat

@@ -54,6 +54,7 @@ enum DragSessionTermination: Equatable {
 final class CalendarDragCoordinator {
     private(set) var engine: DragSessionEngine
     private let overlayTimings: DragOverlayAnimationTimings
+    private let traceSink: DragHandoffTraceSink
     private(set) var draggedItem: TicItem?
     private(set) var placeholderItemId: String?
     private(set) var displayedOverlayFrameGlobal: CGRect?
@@ -77,10 +78,12 @@ final class CalendarDragCoordinator {
 
     init(
         params: DragSessionParams = .baseline,
-        overlayTimings: DragOverlayAnimationTimings = .baseline
+        overlayTimings: DragOverlayAnimationTimings = .baseline,
+        traceSink: DragHandoffTraceSink = .disabled
     ) {
         self.engine = DragSessionEngine(params: params)
         self.overlayTimings = overlayTimings
+        self.traceSink = traceSink
     }
 
     var overlayItem: TicItem? {
@@ -229,6 +232,7 @@ final class CalendarDragCoordinator {
         let dragScope = map(scope)
         visibleScope = dragScope
         guard engine.snapshot.source != nil else { return }
+        let previousActiveDate = snapshot.activeDate
 
         if isCommitLandingPendingOrRunning {
             maybeStartPendingLandingIfPossible()
@@ -243,7 +247,12 @@ final class CalendarDragCoordinator {
             calendarFrames: hoverEnabledCalendarFrames(for: dragScope)
         )
         updatePresentationForScopeChange(to: dragScope)
-        syncDisplayedOverlayFrame(animated: dragScope != .day && overlayPresentation.style == .calendarPill)
+        syncDisplayedOverlayFrame(
+            animated: shouldAnimateCalendarPillFrameChange(
+                scope: dragScope,
+                previousActiveDate: previousActiveDate
+            )
+        )
     }
 
     func updateVisibleDay(_ date: Date) {
@@ -278,6 +287,7 @@ final class CalendarDragCoordinator {
               let pointer = engine.snapshot.pointerGlobal else {
             return
         }
+        let previousActiveDate = snapshot.activeDate
 
         engine.updateScope(
             scope,
@@ -286,7 +296,12 @@ final class CalendarDragCoordinator {
             timelineLayout: timelineLayout,
             calendarFrames: hoverEnabledCalendarFrames(for: scope)
         )
-        syncDisplayedOverlayFrame(animated: overlayPresentation.style == .calendarPill && snapshot.activeDate != nil)
+        syncDisplayedOverlayFrame(
+            animated: shouldAnimateCalendarPillFrameChange(
+                scope: scope,
+                previousActiveDate: previousActiveDate
+            )
+        )
     }
 
     func updateTimelineLayout(
@@ -389,6 +404,7 @@ final class CalendarDragCoordinator {
         case .localPreview:
             let token = touchClaimHandoff.beginLocalPreview(at: timestamp ?? nextClaimTimestamp())
             handoffState = resolvedHandoffState(for: .rootClaimPending)
+            traceSink.record(.dragStart(token: token))
             return token
         case .rootClaimPending, .rootClaimAcquired, .landing, .restoring:
             return handoffState.token
@@ -410,6 +426,10 @@ final class CalendarDragCoordinator {
         switch result {
         case .applied:
             handoffState = resolvedHandoffState(for: .rootClaimAcquired)
+            traceSink.record(.rootClaimSuccess(token: token))
+            if let claimLatencyMs = touchClaimHandoff.snapshot.claimLatencyMs {
+                traceSink.record(.claimLatencyMs(claimLatencyMs))
+            }
             activateCalendarHoverIfNeeded()
             updatePresentationAfterRootClaimSuccess()
         case .ignored:
@@ -432,6 +452,7 @@ final class CalendarDragCoordinator {
         )
 
         if result == .applied {
+            recordRestoreReason(.cancelled)
             beginRestoreAfterClaimFailure()
         }
         return result
@@ -456,6 +477,10 @@ final class CalendarDragCoordinator {
     ) -> DragTouchClaimEventResult {
         let result = touchClaimHandoff.expirePendingClaimIfNeeded(at: timestamp)
         if result == .applied {
+            if let token = touchClaimHandoff.snapshot.token {
+                traceSink.record(.rootClaimTimeout(token: token))
+            }
+            recordRestoreReason(.timeout)
             beginRestoreAfterClaimFailure()
         }
         return result
@@ -478,12 +503,18 @@ final class CalendarDragCoordinator {
         case .day:
             updateDayDrag(pointerGlobal: pointerGlobal)
         case .month, .year:
+            let previousActiveDate = snapshot.activeDate
             engine.dragMoved(
                 to: pointerGlobal,
                 timestampMs: nowTimestampMs(),
                 calendarFrames: hoverEnabledCalendarFrames(for: engine.snapshot.currentScope)
             )
-            syncDisplayedOverlayFrame(animated: overlayPresentation.style == .calendarPill && snapshot.activeDate != nil)
+            syncDisplayedOverlayFrame(
+                animated: shouldAnimateCalendarPillFrameChange(
+                    scope: engine.snapshot.currentScope,
+                    previousActiveDate: previousActiveDate
+                )
+            )
         }
     }
 
@@ -515,6 +546,9 @@ final class CalendarDragCoordinator {
                 for: token,
                 at: nextClaimTimestamp()
             )
+        }
+        if handoffState.phase != .idle && handoffState.phase != .restoring {
+            recordRestoreReason(.cancelled)
         }
         let snapshot = engine.cancel(timestampMs: nowTimestampMs())
         handoffState = resolvedHandoffState(for: .restoring)
@@ -552,6 +586,7 @@ final class CalendarDragCoordinator {
         }
 
         if snapshot.state == .restoring {
+            recordRestoreReason(.invalidDrop)
             handoffState = resolvedHandoffState(for: .restoring)
             updatePresentation(to: .restoring, animated: true)
             scheduleRestoreCleanup()
@@ -761,6 +796,7 @@ final class CalendarDragCoordinator {
               let pointer = engine.snapshot.pointerGlobal else {
             return
         }
+        let previousActiveDate = snapshot.activeDate
 
         engine.updateScope(
             engine.snapshot.currentScope,
@@ -769,7 +805,12 @@ final class CalendarDragCoordinator {
             timelineLayout: timelineLayout,
             calendarFrames: hoverEnabledCalendarFrames(for: engine.snapshot.currentScope)
         )
-        syncDisplayedOverlayFrame(animated: visibleScope != .day && snapshot.activeDate != nil)
+        syncDisplayedOverlayFrame(
+            animated: shouldAnimateCalendarPillFrameChange(
+                scope: engine.snapshot.currentScope,
+                previousActiveDate: previousActiveDate
+            )
+        )
     }
 
     private func updatePresentationAfterRootClaimSuccess() {
@@ -936,6 +977,22 @@ final class CalendarDragCoordinator {
 
     private func nowTimestampMs() -> Int {
         Int(Date().timeIntervalSince1970 * 1000)
+    }
+
+    private func shouldAnimateCalendarPillFrameChange(
+        scope: DragSessionScope,
+        previousActiveDate: Date?
+    ) -> Bool {
+        DragCalendarPillAnimationPolicy.shouldAnimateFrameChange(
+            style: overlayPresentation.style,
+            scope: scope,
+            previousActiveDate: previousActiveDate,
+            nextActiveDate: snapshot.activeDate
+        )
+    }
+
+    private func recordRestoreReason(_ reason: DragHandoffRestoreTraceReason) {
+        traceSink.record(.restoreReason(reason))
     }
 
     private func calendarFrames(for scope: DragSessionScope) -> [DateCellFrame] {

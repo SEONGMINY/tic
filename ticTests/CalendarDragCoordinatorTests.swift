@@ -37,6 +37,25 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .lifted)
     }
 
+    func testDragStartAndClaimSuccessRecordTraceEvents() {
+        let recorder = DragHandoffTraceRecorder()
+        let coordinator = makeCoordinator(traceRecorder: recorder)
+
+        beginDrag(coordinator, item: makeItem())
+        let token = currentToken(for: coordinator)
+
+        claimSuccess(coordinator)
+
+        XCTAssertEqual(
+            recorder.events,
+            [
+                .dragStart(token: token),
+                .rootClaimSuccess(token: token),
+                .claimLatencyMs(16)
+            ]
+        )
+    }
+
     func testClaimSuccessEnablesRootOwnerAndPlaceholderOnlyAfterSuccess() {
         let coordinator = makeCoordinator()
         let item = makeItem()
@@ -160,6 +179,7 @@ final class CalendarDragCoordinatorTests: XCTestCase {
     }
 
     func testClaimTimeoutRestoresSessionThroughRestorePath() {
+        let recorder = DragHandoffTraceRecorder()
         let coordinator = makeCoordinator(
             restoreAnimationMs: 1,
             overlayTimings: DragOverlayAnimationTimings(
@@ -167,11 +187,13 @@ final class CalendarDragCoordinatorTests: XCTestCase {
                 scopeHoldDurationMs: 1,
                 pillTransitionDurationMs: 1,
                 landingDurationMs: 1
-            )
+            ),
+            traceRecorder: recorder
         )
 
         beginDrag(coordinator, item: makeItem())
         coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        let token = currentToken(for: coordinator)
 
         let result = coordinator.expirePendingRootClaimIfNeeded(
             at: timestamp(frame: 13, uptimeMs: 150)
@@ -185,6 +207,14 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertNotNil(coordinator.localPreviewFrameGlobal(for: "event-1"))
         XCTAssertFalse(coordinator.isShowingPlaceholder(for: "event-1"))
         XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .restoring)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                .dragStart(token: token),
+                .rootClaimTimeout(token: token),
+                .restoreReason(.timeout)
+            ]
+        )
 
         waitForRestoreCleanup()
 
@@ -192,6 +222,7 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.handoffState.phase, .idle)
         XCTAssertEqual(coordinator.lastSessionTermination, .cancelled)
         XCTAssertFalse(coordinator.isSessionVisible)
+        XCTAssertNil(coordinator.rootOverlayItem)
     }
 
     func testStaleTokenSuccessDoesNotContaminateCurrentSession() {
@@ -338,6 +369,139 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(state?.displayedYear, dropDate.year)
     }
 
+    func testRoundTripTouchUpTerminatesOnlyOnce() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let dropPoint = CGPoint(x: 260, y: 100)
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+        let yearFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        claimSuccess(coordinator)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
+        coordinator.updateCalendarFrames(yearFrames, scope: .year)
+        coordinator.updateVisibleScope(.month)
+        coordinator.updateGlobalDrag(pointerGlobal: dropPoint)
+        coordinator.updateVisibleScope(.year)
+        coordinator.updateGlobalDrag(pointerGlobal: dropPoint)
+        coordinator.updateVisibleScope(.month)
+        coordinator.updateGlobalDrag(pointerGlobal: dropPoint)
+
+        let token = currentToken(for: coordinator)
+        let commit = coordinator.completeGlobalDrag()
+        let nextState = commit.map { CalendarScopeTransition.stateAfterGlobalDrop(commit: $0) }
+
+        XCTAssertNotNil(commit)
+        if let nextState {
+            coordinator.updateVisibleDay(nextState.selectedDate)
+            coordinator.updateVisibleScope(nextState.scope)
+        }
+
+        waitForCleanup()
+
+        XCTAssertEqual(coordinator.lastSessionTermination, .committed)
+        XCTAssertEqual(coordinator.sessionTerminationCount, 1)
+        XCTAssertFalse(coordinator.hasActiveSession)
+        XCTAssertEqual(coordinator.applyRootClaimEnd(for: token), .ignored)
+        XCTAssertEqual(coordinator.sessionTerminationCount, 1)
+    }
+
+    func testStaleClaimSuccessAfterCancellationDoesNotReviveSession() {
+        let recorder = DragHandoffTraceRecorder()
+        let coordinator = makeCoordinator(
+            restoreAnimationMs: 1,
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            ),
+            traceRecorder: recorder
+        )
+
+        beginDrag(coordinator, item: makeItem())
+        let token = currentToken(for: coordinator)
+
+        XCTAssertEqual(
+            coordinator.applyRootClaimCancellation(
+                for: token,
+                at: timestamp(frame: 11, uptimeMs: 116)
+            ),
+            .applied
+        )
+        XCTAssertEqual(coordinator.handoffState.phase, .restoring)
+
+        waitForRestoreCleanup()
+
+        XCTAssertEqual(
+            coordinator.applyRootClaimSuccess(
+                for: token,
+                at: timestamp(frame: 12, uptimeMs: 132)
+            ),
+            .ignored
+        )
+        XCTAssertEqual(
+            recorder.events,
+            [
+                .dragStart(token: token),
+                .restoreReason(.cancelled)
+            ]
+        )
+        XCTAssertEqual(coordinator.handoffState.phase, .idle)
+        XCTAssertFalse(coordinator.hasActiveSession)
+        XCTAssertFalse(coordinator.isSessionVisible)
+        XCTAssertNil(coordinator.rootOverlayItem)
+    }
+
+    func testMonthPointerFollowKeepsPresentationStableWithinSameActiveDate() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+        let firstPoint = CGPoint(x: 260, y: 100)
+        let secondPoint = CGPoint(x: 268, y: 108)
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        claimSuccess(coordinator)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
+        coordinator.updateVisibleScope(.month)
+
+        waitForCleanup()
+
+        coordinator.updateGlobalDrag(pointerGlobal: firstPoint)
+        let firstPresentation = coordinator.overlayPresentation
+        let firstFrame = coordinator.rootOverlayFrameLocal
+
+        coordinator.updateGlobalDrag(pointerGlobal: secondPoint)
+
+        XCTAssertEqual(coordinator.snapshot.activeDate, dropDate.startOfDay)
+        XCTAssertEqual(coordinator.overlayPresentation, firstPresentation)
+        XCTAssertEqual(coordinator.rootOverlayFrameLocal, firstFrame)
+    }
+
     private var selectedDate: Date {
         Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 16))!
     }
@@ -368,14 +532,16 @@ final class CalendarDragCoordinatorTests: XCTestCase {
 
     private func makeCoordinator(
         restoreAnimationMs: Int = 220,
-        overlayTimings: DragOverlayAnimationTimings = .baseline
+        overlayTimings: DragOverlayAnimationTimings = .baseline,
+        traceRecorder: DragHandoffTraceRecorder? = nil
     ) -> CalendarDragCoordinator {
         var params = DragSessionParams.baseline
         params.restoreAnimationMs = restoreAnimationMs
 
         let coordinator = CalendarDragCoordinator(
             params: params,
-            overlayTimings: overlayTimings
+            overlayTimings: overlayTimings,
+            traceSink: traceRecorder?.sink ?? .disabled
         )
         coordinator.updateVisibleDay(selectedDate)
         coordinator.updateTimelineLayout(

@@ -84,6 +84,41 @@ final class DragOverlayPresentationTests: XCTestCase {
         XCTAssertEqual(first, second)
     }
 
+    func testCalendarPillFrameAnimationSkipsPointerFollowWithinSameActiveDate() {
+        let date = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+
+        XCTAssertFalse(
+            DragCalendarPillAnimationPolicy.shouldAnimateFrameChange(
+                style: .calendarPill,
+                scope: .month,
+                previousActiveDate: date.startOfDay,
+                nextActiveDate: date.startOfDay
+            )
+        )
+    }
+
+    func testCalendarPillFrameAnimationRunsWhenActiveDateChanges() {
+        let previousDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let nextDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 21))!
+
+        XCTAssertTrue(
+            DragCalendarPillAnimationPolicy.shouldAnimateFrameChange(
+                style: .calendarPill,
+                scope: .month,
+                previousActiveDate: previousDate.startOfDay,
+                nextActiveDate: nextDate.startOfDay
+            )
+        )
+        XCTAssertFalse(
+            DragCalendarPillAnimationPolicy.shouldAnimateFrameChange(
+                style: .timelineCard,
+                scope: .month,
+                previousActiveDate: previousDate.startOfDay,
+                nextActiveDate: nextDate.startOfDay
+            )
+        )
+    }
+
     func testYearHoverPolicyIsMoreConservativeThanMonth() {
         let monthPolicy = DragCalendarHoverPolicy.forScope(
             .month,
