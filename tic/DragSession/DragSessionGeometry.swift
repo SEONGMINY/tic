@@ -6,6 +6,12 @@ enum DragSessionGeometry {
         rect.insetBy(dx: inset, dy: inset)
     }
 
+    static func safeInset(_ rect: CGRect, by inset: CGFloat) -> CGRect {
+        let dx = min(max(inset, 0), rect.width * 0.35)
+        let dy = min(max(inset, 0), rect.height * 0.35)
+        return rect.insetBy(dx: dx, dy: dy)
+    }
+
     static func expand(_ rect: CGRect, by amount: CGFloat) -> CGRect {
         rect.insetBy(dx: -amount, dy: -amount)
     }
@@ -75,7 +81,7 @@ enum DragSessionGeometry {
         }
 
         for cell in dateCellFrames {
-            let targetRect = inset(cell.frameGlobal, by: cellHitInset)
+            let targetRect = safeInset(cell.frameGlobal, by: cellHitInset)
             if pointInRect(pointerGlobal, rect: targetRect) {
                 return cell.date
             }

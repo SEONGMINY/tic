@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-cc-company phase runner.
+Codex phase runner.
 Reads tasks/{task-dir}/index.json, finds the next pending phase,
-spawns a Claude Code session with the phase prompt, and updates status.
+spawns a Codex session with the phase prompt, and updates status.
 
 Usage: python3 run-phases.py <task-dir>
 Example: python3 run-phases.py 0-mvp
@@ -30,13 +30,15 @@ KST = timezone(timedelta(hours=9))
 COMMIT_MSG_TEMPLATE = "feat({task_name}): phase {phase_num} — {phase_name}"
 RUNNER_COMMIT_MSG_TEMPLATE = "chore({task_name}): phase {phase_num} output + timestamps"
 SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-RUNNER_LABEL = "Claude"
+RUNNER_LABEL = "Codex"
 RUNNER_CMD = [
-    "claude",
-    "-p",
-    "--dangerously-skip-permissions",
-    "--output-format", "json",
+    "codex",
+    "exec",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--json",
 ]
+# Codex exec keeps reading from stdin until EOF, so phase prompts are piped via stdin.
+RUNNER_PROMPT_STDIN = True
 
 
 # ---------------------------------------------------------------------------
@@ -298,13 +300,17 @@ def run_phase(task_dir: Path, phase: dict, preamble: str, gh_env: dict[str, str]
 
     output_file = task_dir / f"phase{phase_num}-output.json"
 
-    cmd = [*RUNNER_CMD, full_prompt]
+    if RUNNER_PROMPT_STDIN:
+        cmd = [*RUNNER_CMD, "-"]
+    else:
+        cmd = [*RUNNER_CMD, full_prompt]
 
     result = subprocess.run(
         cmd,
         cwd=str(ROOT),
         capture_output=True,
         text=True,
+        input=full_prompt if RUNNER_PROMPT_STDIN else None,
         timeout=600,  # 10 minutes per phase
         env={**os.environ, **gh_env} if gh_env else None,
     )

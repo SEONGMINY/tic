@@ -15,6 +15,7 @@ struct DayView: View {
     var notificationService: NotificationService
     var dragCoordinator: CalendarDragCoordinator
     var onEditItem: (TicItem) -> Void
+    var onBeginMoveDrag: (TicItem, CGRect, CGPoint, CGPoint) -> Bool
 
     @State private var showActionSheet = false
     @State private var showDeleteAlert = false
@@ -100,6 +101,7 @@ struct DayView: View {
             onDeleteItem: handleDeleteRequest,
             onCompleteItem: handleComplete,
             onTimelineLayoutChange: handleTimelineLayoutChange,
+            onBeginMoveDrag: onBeginMoveDrag,
             editingItemId: $editingItemId,
             showEditToolbar: $showEditToolbar,
             isEditingGestureActive: $isEditingGestureActive,
@@ -429,13 +431,16 @@ struct DayView: View {
     }
 
     private func handleSessionTermination() {
-        guard let termination = dragCoordinator.lastSessionTermination,
-              termination.clearsEditingState else {
+        guard let termination = dragCoordinator.lastSessionTermination else {
             return
         }
 
-        editingItemId = nil
-        showEditToolbar = false
+        if termination.clearsEditingState {
+            editingItemId = nil
+            showEditToolbar = false
+        } else if editingItemId != nil {
+            showEditToolbar = true
+        }
         isEditingGestureActive = false
     }
 

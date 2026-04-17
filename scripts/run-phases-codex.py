@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Codex phase runner.
-Reuses scripts/run-phases.py and swaps only the agent command.
+Compatibility shim for the Codex phase runner.
+Use scripts/run-phases.py for the canonical entrypoint.
 
 Usage: python3 run-phases-codex.py <task-dir>
 Example: python3 run-phases-codex.py 0-mvp
@@ -22,14 +22,6 @@ if spec is None or spec.loader is None:
 
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-
-module.RUNNER_LABEL = "Codex"
-module.RUNNER_CMD = [
-    "codex",
-    "exec",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--json",
-]
 
 
 if __name__ == "__main__":

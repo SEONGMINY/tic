@@ -203,12 +203,13 @@ struct DragSessionEngine {
     }
 
     private mutating func updateCalendarCandidates(with point: CGPoint, calendarFrames: [DateCellFrame]) {
-        snapshot.activeDate = DragSessionGeometry.activeDate(
+        snapshot.activeDate = DragCalendarHoverResolver.activeDate(
             pointerGlobal: point,
+            scope: snapshot.currentScope,
             dateCellFrames: calendarFrames,
-            cellHitInset: params.cellHitInsetPt,
+            baseHitInset: params.cellHitInsetPt,
             previousActiveDate: snapshot.activeDate,
-            cellHysteresis: params.cellHysteresisPt
+            baseHysteresis: params.cellHysteresisPt
         )
         if let activeDate = snapshot.activeDate {
             snapshot.dateCandidate = activeDate

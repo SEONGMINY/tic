@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import ActivityKit
+import UIKit
 
 struct ContentView: View {
     @Query private var calendarSelections: [CalendarSelection]
@@ -11,6 +12,7 @@ struct ContentView: View {
     @State private var eventFormViewModel = EventFormViewModel()
     @State private var liveActivityService = LiveActivityService()
     @State private var dragCoordinator = CalendarDragCoordinator()
+    @State private var rootTouchCapture = DragSessionTouchCaptureController()
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showEventForm = false
@@ -33,7 +35,6 @@ struct ContentView: View {
                 .simultaneousGesture(scopePinchGesture, including: .all)
                 .animation(.spring(duration: 0.35, bounce: 0.05), value: viewModel.scope)
         }
-        .simultaneousGesture(rootDragGesture, including: .all)
         .background {
             GeometryReader { proxy in
                 Color.clear
@@ -42,14 +43,34 @@ struct ContentView: View {
                     }
                     .onChange(of: proxy.frame(in: .global)) { _, newValue in
                         dragCoordinator.updateRootFrame(newValue)
-                    }
+                }
             }
+        }
+        .background {
+            DragSessionTouchCaptureBridge(
+                controller: rootTouchCapture,
+                onMove: { point in
+                    guard dragCoordinator.isGestureSessionActive else { return }
+                    dragCoordinator.updateActiveDrag(pointerGlobal: point)
+                },
+                onEnd: {
+                    handleCapturedDragEnded()
+                },
+                onCancel: {
+                    guard dragCoordinator.hasActiveSession else { return }
+                    dragCoordinator.cancelDrag()
+                }
+            )
         }
         .overlay(alignment: .topLeading) {
             if let overlayItem = dragCoordinator.overlayItem,
                let overlayFrame = dragCoordinator.overlayFrameLocal {
-                DragSessionOverlayBlock(item: overlayItem, frame: overlayFrame)
-                    .zIndex(10)
+                DragSessionOverlayBlock(
+                    item: overlayItem,
+                    frame: overlayFrame,
+                    presentation: dragCoordinator.overlayPresentation
+                )
+                    .zIndex(dragCoordinator.overlayPresentation.zIndex)
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -94,7 +115,11 @@ struct ContentView: View {
                 Task { await checkLiveActivity() }
             } else if dragCoordinator.hasActiveSession {
                 dragCoordinator.cancelDrag()
+                rootTouchCapture.releaseTracking()
             }
+        }
+        .onChange(of: dragCoordinator.sessionTerminationCount) { _, _ in
+            rootTouchCapture.releaseTracking()
         }
         .onReceive(liveActivityTimer) { _ in
             Task { await checkLiveActivity() }
@@ -215,27 +240,18 @@ struct ContentView: View {
                 onEditItem: { item in
                     eventFormViewModel.prepareForEdit(item, service: eventKitService)
                     showEventForm = true
+                },
+                onBeginMoveDrag: { item, sourceFrameGlobal, startPointerGlobal, currentPointerGlobal in
+                    beginCapturedMoveDrag(
+                        item: item,
+                        sourceFrameGlobal: sourceFrameGlobal,
+                        startPointerGlobal: startPointerGlobal,
+                        currentPointerGlobal: currentPointerGlobal
+                    )
                 }
             )
             .transition(.opacity.combined(with: .scale(scale: 1.02)))
         }
-    }
-
-    private var rootDragGesture: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .global)
-            .onChanged { value in
-                guard dragCoordinator.shouldHandleDragGlobally else { return }
-                dragCoordinator.updateGlobalDrag(pointerGlobal: value.location)
-            }
-            .onEnded { _ in
-                guard dragCoordinator.shouldHandleDragGlobally else { return }
-                guard let item = dragCoordinator.sessionItem else {
-                    dragCoordinator.cancelDrag()
-                    return
-                }
-                guard let commit = dragCoordinator.completeGlobalDrag() else { return }
-                applyGlobalDragCommit(item, commit: commit)
-            }
     }
 
     private var scopePinchGesture: some Gesture {
@@ -319,5 +335,45 @@ struct ContentView: View {
         } catch {
             eventKitService.lastChangeDate = Date()
         }
+    }
+
+    private func beginCapturedMoveDrag(
+        item: TicItem,
+        sourceFrameGlobal: CGRect,
+        startPointerGlobal: CGPoint,
+        currentPointerGlobal: CGPoint
+    ) -> Bool {
+        if dragCoordinator.hasActiveSession {
+            return true
+        }
+        // The root coordinator must own the live finger before the source block yields to the overlay.
+        guard rootTouchCapture.captureTouch(near: currentPointerGlobal) else {
+            return false
+        }
+
+        dragCoordinator.beginDayDrag(
+            item: item,
+            sourceFrameGlobal: sourceFrameGlobal,
+            pointerGlobal: startPointerGlobal
+        )
+        dragCoordinator.updateActiveDrag(pointerGlobal: currentPointerGlobal)
+        return true
+    }
+
+    private func handleCapturedDragEnded() {
+        guard let item = dragCoordinator.sessionItem else {
+            dragCoordinator.cancelDrag()
+            return
+        }
+
+        let commit: DragSessionCommit?
+        if dragCoordinator.snapshot.currentScope == .day {
+            commit = dragCoordinator.completeTimelineDrop()
+        } else {
+            commit = dragCoordinator.completeGlobalDrag()
+        }
+
+        guard let commit else { return }
+        applyGlobalDragCommit(item, commit: commit)
     }
 }

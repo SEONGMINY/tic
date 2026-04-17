@@ -23,14 +23,14 @@ struct EditableEventBlock: View {
     var onResizeItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onMoveItem: (_ itemId: String, _ newStart: Date, _ newEnd: Date) -> Void
     var onDuplicateItem: (_ itemId: String) -> Void
-    var onMoveGestureBegan: ((_ sourceFrameGlobal: CGRect, _ pointerGlobal: CGPoint) -> Void)?
+    var onMoveGestureBegan: ((_ sourceFrameGlobal: CGRect, _ startPointerGlobal: CGPoint, _ currentPointerGlobal: CGPoint) -> Bool)?
     var onMoveGestureChanged: ((_ pointerGlobal: CGPoint) -> Void)?
-    var onMoveGestureEnded: (() -> Void)?
 
     @State private var activeDrag: DragType = .none
     @State private var dragOffset: CGFloat = 0
     @State private var tooltipTime: String?
     @State private var tooltipY: CGFloat = 0
+    @State private var externalMoveSessionStarted = false
 
     private let handleSize: CGFloat = 10
     private let handleHitSize: CGFloat = 32
@@ -62,7 +62,7 @@ struct EditableEventBlock: View {
 
     private var clampedFrameH: CGFloat { max(visualHeight - 1, 16) }
     private var usesExternalMoveSession: Bool {
-        onMoveGestureBegan != nil && onMoveGestureChanged != nil && onMoveGestureEnded != nil
+        onMoveGestureBegan != nil && onMoveGestureChanged != nil
     }
 
     var body: some View {
@@ -259,12 +259,21 @@ struct EditableEventBlock: View {
             showEditToolbar = false
 
             if dragType == .move, usesExternalMoveSession {
-                onMoveGestureBegan?(baseFrameGlobal, value.startLocation)
+                externalMoveSessionStarted = false
             }
         }
 
         if dragType == .move, usesExternalMoveSession {
-            onMoveGestureChanged?(value.location)
+            if externalMoveSessionStarted == false {
+                externalMoveSessionStarted = onMoveGestureBegan?(
+                    baseFrameGlobal,
+                    value.startLocation,
+                    value.location
+                ) ?? false
+            }
+            if externalMoveSessionStarted {
+                onMoveGestureChanged?(value.location)
+            }
             return
         }
 
@@ -316,10 +325,13 @@ struct EditableEventBlock: View {
             isEditingGestureActive = false
             dragOffset = 0
             tooltipTime = nil
+            externalMoveSessionStarted = false
         }
 
         if dragType == .move, usesExternalMoveSession {
-            onMoveGestureEnded?()
+            if externalMoveSessionStarted == false {
+                showEditToolbar = true
+            }
             return
         }
 

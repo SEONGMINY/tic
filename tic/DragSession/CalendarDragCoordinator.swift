@@ -43,9 +43,9 @@ enum DragSessionTermination: Equatable {
     var clearsEditingState: Bool {
         switch self {
         case .committed:
-            return false
-        case .cancelled, .invalidDropRestored:
             return true
+        case .cancelled, .invalidDropRestored:
+            return false
         }
     }
 }
@@ -53,9 +53,11 @@ enum DragSessionTermination: Equatable {
 @Observable
 final class CalendarDragCoordinator {
     private(set) var engine: DragSessionEngine
+    private let overlayTimings: DragOverlayAnimationTimings
     private(set) var draggedItem: TicItem?
     private(set) var placeholderItemId: String?
     private(set) var displayedOverlayFrameGlobal: CGRect?
+    private(set) var overlayPresentation: DragOverlayPresentation = .inactive
     private(set) var dropOwner: DragDropOwner = .localDayTimeline
     private(set) var lastSessionTermination: DragSessionTermination?
     private(set) var sessionTerminationCount = 0
@@ -63,15 +65,37 @@ final class CalendarDragCoordinator {
     private var rootFrameGlobal: CGRect = .zero
     private var timelineLayout: DragTimelineLayout?
     private var visibleDayDate: Date = .now.startOfDay
+    private var visibleScope: DragSessionScope = .day
     private var calendarFramesByScope: [DragSessionScope: [DateCellFrame]] = [:]
+    private var calendarPillWidth: CGFloat = DragOverlayPresentationResolver.defaultPillWidth
+    private var phaseAdvanceWorkItem: DispatchWorkItem?
     private var restoreCleanupWorkItem: DispatchWorkItem?
+    private var landingCleanupWorkItem: DispatchWorkItem?
+    private var pendingLandingCommit: DragSessionCommit?
 
-    init(params: DragSessionParams = .baseline) {
+    init(
+        params: DragSessionParams = .baseline,
+        overlayTimings: DragOverlayAnimationTimings = .baseline
+    ) {
         self.engine = DragSessionEngine(params: params)
+        self.overlayTimings = overlayTimings
     }
 
     var overlayItem: TicItem? {
         guard let draggedItem else { return nil }
+        if let pendingLandingCommit {
+            return draggedItem.updatingDates(
+                startDate: pendingLandingCommit.start,
+                endDate: pendingLandingCommit.end
+            )
+        }
+        if let finalDropResult = snapshot.finalDropResult,
+           let absoluteDates = DragSessionGeometry.absoluteDates(from: finalDropResult) {
+            return draggedItem.updatingDates(
+                startDate: absoluteDates.start,
+                endDate: absoluteDates.end
+            )
+        }
         guard let durationMinute = snapshot.durationMinute,
               let dropResult = DragSessionGeometry.buildFinalDropResult(
                 dateCandidate: snapshot.dropCandidateDate,
@@ -112,19 +136,36 @@ final class CalendarDragCoordinator {
         draggedItem
     }
 
+    var isGestureSessionActive: Bool {
+        guard draggedItem != nil else { return false }
+        guard pendingLandingCommit == nil else { return false }
+
+        switch snapshot.state {
+        case .pressing, .dragReady, .draggingTimeline, .draggingCalendar:
+            return true
+        case .idle, .restoring:
+            return false
+        }
+    }
+
     var shouldHandleDragGlobally: Bool {
-        dropOwner.handlesGlobalDrop(hasActiveSession: draggedItem != nil)
+        dropOwner.handlesGlobalDrop(hasActiveSession: isGestureSessionActive)
     }
 
     var shouldHandleDropLocally: Bool {
         dropOwner.handlesLocalDrop(
             in: snapshot.currentScope,
-            hasActiveSession: draggedItem != nil
+            hasActiveSession: isGestureSessionActive
         )
     }
 
     var hasActiveSession: Bool {
         draggedItem != nil || snapshot.source != nil
+    }
+
+    func sourcePlaceholderOpacity(for itemId: String?) -> Double? {
+        guard let itemId, itemId == placeholderItemId, hasActiveSession else { return nil }
+        return overlayPresentation.sourcePlaceholderOpacity
     }
 
     func updateRootFrame(_ frameGlobal: CGRect) {
@@ -133,7 +174,13 @@ final class CalendarDragCoordinator {
 
     func updateVisibleScope(_ scope: CalendarScope) {
         let dragScope = map(scope)
+        visibleScope = dragScope
         guard engine.snapshot.source != nil else { return }
+
+        if isCommitLandingPendingOrRunning {
+            maybeStartPendingLandingIfPossible()
+            return
+        }
 
         dropOwner = DragDropOwner.nextOwner(
             afterShowing: dragScope,
@@ -147,11 +194,16 @@ final class CalendarDragCoordinator {
             timelineLayout: timelineLayout,
             calendarFrames: calendarFrames(for: dragScope)
         )
-        syncDisplayedOverlayFrame()
+        updatePresentationForScopeChange(to: dragScope)
+        syncDisplayedOverlayFrame(animated: dragScope != .day && overlayPresentation.style == .calendarPill)
     }
 
     func updateVisibleDay(_ date: Date) {
         visibleDayDate = date.startOfDay
+        if isCommitLandingPendingOrRunning {
+            maybeStartPendingLandingIfPossible()
+            return
+        }
         guard engine.snapshot.dragStarted else { return }
         guard let pointer = engine.snapshot.pointerGlobal else { return }
         engine.updateScope(
@@ -169,6 +221,10 @@ final class CalendarDragCoordinator {
     ) {
         calendarFramesByScope[scope] = frames
 
+        if isCommitLandingPendingOrRunning {
+            return
+        }
+
         guard engine.snapshot.dragStarted,
               engine.snapshot.currentScope == scope,
               let pointer = engine.snapshot.pointerGlobal else {
@@ -182,7 +238,7 @@ final class CalendarDragCoordinator {
             timelineLayout: timelineLayout,
             calendarFrames: frames
         )
-        syncDisplayedOverlayFrame()
+        syncDisplayedOverlayFrame(animated: overlayPresentation.style == .calendarPill && snapshot.activeDate != nil)
     }
 
     func updateTimelineLayout(
@@ -195,6 +251,11 @@ final class CalendarDragCoordinator {
             scrollOffsetY: scrollOffsetY,
             hourHeight: hourHeight
         )
+
+        if isCommitLandingPendingOrRunning {
+            maybeStartPendingLandingIfPossible()
+            return
+        }
 
         guard engine.snapshot.currentScope == .day,
               engine.snapshot.dragStarted,
@@ -219,6 +280,8 @@ final class CalendarDragCoordinator {
             return
         }
 
+        phaseAdvanceWorkItem?.cancel()
+        landingCleanupWorkItem?.cancel()
         restoreCleanupWorkItem?.cancel()
         let source = DragSessionSource(
             itemId: item.id,
@@ -240,11 +303,15 @@ final class CalendarDragCoordinator {
         draggedItem = item
         placeholderItemId = item.id
         dropOwner = .localDayTimeline
+        visibleScope = .day
+        calendarPillWidth = resolvedCalendarPillWidth(from: sourceFrameGlobal)
+        overlayPresentation = resolvedPresentation(for: .lifted)
         syncDisplayedOverlayFrame()
+        scheduleLiftAdvance()
     }
 
     func updateDayDrag(pointerGlobal: CGPoint) {
-        guard draggedItem != nil else { return }
+        guard isGestureSessionActive else { return }
         engine.dragMoved(
             to: pointerGlobal,
             timestampMs: nowTimestampMs(),
@@ -253,19 +320,35 @@ final class CalendarDragCoordinator {
         syncDisplayedOverlayFrame()
     }
 
+    func updateActiveDrag(pointerGlobal: CGPoint) {
+        guard isGestureSessionActive else { return }
+
+        switch engine.snapshot.currentScope {
+        case .day:
+            updateDayDrag(pointerGlobal: pointerGlobal)
+        case .month, .year:
+            engine.dragMoved(
+                to: pointerGlobal,
+                timestampMs: nowTimestampMs(),
+                calendarFrames: calendarFrames(for: engine.snapshot.currentScope)
+            )
+            syncDisplayedOverlayFrame(animated: overlayPresentation.style == .calendarPill && snapshot.activeDate != nil)
+        }
+    }
+
     func updateGlobalDrag(pointerGlobal: CGPoint) {
         guard shouldHandleDragGlobally else { return }
-        engine.dragMoved(
-            to: pointerGlobal,
-            timestampMs: nowTimestampMs(),
-            timelineLayout: engine.snapshot.currentScope == .day ? timelineLayout : nil,
-            calendarFrames: calendarFrames(for: engine.snapshot.currentScope)
-        )
-        syncDisplayedOverlayFrame()
+        updateActiveDrag(pointerGlobal: pointerGlobal)
     }
 
     func completeLocalDrag() -> DragSessionCommit? {
         guard shouldHandleDropLocally else { return nil }
+        return completeActiveDrag()
+    }
+
+    func completeTimelineDrop() -> DragSessionCommit? {
+        guard isGestureSessionActive else { return nil }
+        guard snapshot.currentScope == .day else { return nil }
         return completeActiveDrag()
     }
 
@@ -275,7 +358,9 @@ final class CalendarDragCoordinator {
     }
 
     func cancelDrag() {
+        guard isCommitLandingPendingOrRunning == false else { return }
         let snapshot = engine.cancel(timestampMs: nowTimestampMs())
+        updatePresentation(to: .restoring, animated: true)
         syncDisplayedOverlayFrame()
         if snapshot.state == .restoring {
             scheduleRestoreCleanup()
@@ -294,7 +379,7 @@ final class CalendarDragCoordinator {
             return nil
         }
         let snapshot = engine.drop(timestampMs: nowTimestampMs())
-        syncDisplayedOverlayFrame()
+        syncDisplayedOverlayFrame(animated: overlayPresentation.style == .calendarPill && snapshot.activeDate != nil)
 
         if let finalDropResult = snapshot.finalDropResult,
            let absoluteDates = DragSessionGeometry.absoluteDates(from: finalDropResult) {
@@ -303,18 +388,22 @@ final class CalendarDragCoordinator {
                 start: absoluteDates.start,
                 end: absoluteDates.end
             )
-            finishSession(.committed)
+            pendingLandingCommit = commit
+            maybeStartPendingLandingIfPossible()
             return commit
         }
 
         if snapshot.state == .restoring {
+            updatePresentation(to: .restoring, animated: true)
             scheduleRestoreCleanup()
         }
         return nil
     }
 
     private func scheduleRestoreCleanup() {
+        phaseAdvanceWorkItem?.cancel()
         restoreCleanupWorkItem?.cancel()
+        landingCleanupWorkItem?.cancel()
         if let restoreTarget = engine.snapshot.restoreTargetFrameGlobal {
             withAnimation(.easeInOut(duration: Double(engine.params.restoreAnimationMs) / 1000.0)) {
                 displayedOverlayFrameGlobal = restoreTarget
@@ -349,19 +438,223 @@ final class CalendarDragCoordinator {
     }
 
     private func resetSession() {
+        phaseAdvanceWorkItem?.cancel()
+        phaseAdvanceWorkItem = nil
         restoreCleanupWorkItem?.cancel()
         restoreCleanupWorkItem = nil
+        landingCleanupWorkItem?.cancel()
+        landingCleanupWorkItem = nil
         engine = DragSessionEngine(params: engine.params)
         draggedItem = nil
         placeholderItemId = nil
+        pendingLandingCommit = nil
         displayedOverlayFrameGlobal = nil
+        overlayPresentation = .inactive
         dropOwner = .localDayTimeline
+        visibleScope = .day
+        calendarPillWidth = DragOverlayPresentationResolver.defaultPillWidth
         calendarFramesByScope[.month] = nil
         calendarFramesByScope[.year] = nil
     }
 
-    private func syncDisplayedOverlayFrame() {
-        displayedOverlayFrameGlobal = engine.snapshot.overlayFrameGlobal
+    private func syncDisplayedOverlayFrame(animated: Bool = false) {
+        guard let nextFrame = resolvedDisplayedOverlayFrame() else {
+            displayedOverlayFrameGlobal = nil
+            return
+        }
+
+        if animated {
+            withAnimation(.easeOut(duration: Double(overlayTimings.pillTransitionDurationMs) / 1000.0)) {
+                displayedOverlayFrameGlobal = nextFrame
+            }
+        } else {
+            withoutAnimation {
+                displayedOverlayFrameGlobal = nextFrame
+            }
+        }
+    }
+
+    private func updatePresentationForScopeChange(to scope: DragSessionScope) {
+        if scope == .day {
+            phaseAdvanceWorkItem?.cancel()
+            let nextPhase: DragOverlayVisualPhase =
+                overlayPresentation.visualPhase == .lifted ? .lifted : .floating
+            updatePresentation(to: nextPhase, animated: overlayPresentation.visualPhase != nextPhase)
+            return
+        }
+
+        updatePresentation(to: .holding, animated: true)
+        scheduleCalendarPillAdvance(for: scope)
+    }
+
+    private func scheduleLiftAdvance() {
+        phaseAdvanceWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.pendingLandingCommit == nil else { return }
+            guard self.snapshot.currentScope == .day else { return }
+            guard self.snapshot.dragStarted else { return }
+            self.updatePresentation(to: .floating, animated: true)
+        }
+        phaseAdvanceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double(overlayTimings.liftDurationMs) / 1000.0,
+            execute: workItem
+        )
+    }
+
+    private func scheduleCalendarPillAdvance(for scope: DragSessionScope) {
+        phaseAdvanceWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.pendingLandingCommit == nil else { return }
+            guard self.visibleScope == scope else { return }
+            guard self.snapshot.currentScope == scope else { return }
+            self.updatePresentation(to: .floating, animated: true)
+            self.syncDisplayedOverlayFrame(animated: self.snapshot.activeDate != nil)
+        }
+        phaseAdvanceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double(overlayTimings.scopeHoldDurationMs) / 1000.0,
+            execute: workItem
+        )
+    }
+
+    private func maybeStartPendingLandingIfPossible() {
+        guard let pendingLandingCommit else { return }
+        guard visibleScope == .day else { return }
+        guard visibleDayDate.isSameDay(as: pendingLandingCommit.start) else { return }
+        guard let targetFrame = landingTargetFrame(for: pendingLandingCommit) else { return }
+
+        phaseAdvanceWorkItem?.cancel()
+        updatePresentation(to: .landing, animated: true)
+        withAnimation(.spring(duration: Double(overlayTimings.landingDurationMs) / 1000.0, bounce: 0.08)) {
+            displayedOverlayFrameGlobal = targetFrame
+        }
+
+        let cleanup = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.finishSession(.committed)
+        }
+        landingCleanupWorkItem?.cancel()
+        landingCleanupWorkItem = cleanup
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double(overlayTimings.landingDurationMs) / 1000.0,
+            execute: cleanup
+        )
+        self.pendingLandingCommit = nil
+    }
+
+    private var isCommitLandingPendingOrRunning: Bool {
+        pendingLandingCommit != nil || landingCleanupWorkItem != nil
+    }
+
+    private func updatePresentation(
+        to phase: DragOverlayVisualPhase,
+        animated: Bool
+    ) {
+        let next = resolvedPresentation(for: phase)
+        guard overlayPresentation != next else { return }
+
+        if animated {
+            let animation: Animation
+            switch phase {
+            case .lifted:
+                animation = .spring(duration: Double(overlayTimings.liftDurationMs) / 1000.0, bounce: 0.12)
+            case .holding, .floating:
+                animation = .easeOut(duration: Double(overlayTimings.pillTransitionDurationMs) / 1000.0)
+            case .restoring:
+                animation = .easeInOut(duration: Double(engine.params.restoreAnimationMs) / 1000.0)
+            case .landing:
+                animation = .spring(duration: Double(overlayTimings.landingDurationMs) / 1000.0, bounce: 0.08)
+            case .anchored, .inactive:
+                animation = .easeOut(duration: 0.12)
+            }
+
+            withAnimation(animation) {
+                overlayPresentation = next
+            }
+        } else {
+            withoutAnimation {
+                overlayPresentation = next
+            }
+        }
+    }
+
+    private func resolvedPresentation(for phase: DragOverlayVisualPhase) -> DragOverlayPresentation {
+        DragOverlayPresentationResolver.resolve(
+            DragOverlayPresentationContext(
+                visualPhase: phase,
+                scope: visibleScope,
+                pillWidth: calendarPillWidth
+            )
+        )
+    }
+
+    private func resolvedDisplayedOverlayFrame() -> CGRect? {
+        guard let baseFrame = engine.snapshot.overlayFrameGlobal ?? displayedOverlayFrameGlobal else {
+            return displayedOverlayFrameGlobal
+        }
+
+        switch overlayPresentation.style {
+        case .timelineCard:
+            return baseFrame
+        case .calendarPill:
+            return calendarPillFrame(baseFrame: baseFrame)
+        }
+    }
+
+    private func calendarPillFrame(baseFrame: CGRect) -> CGRect {
+        let width = overlayPresentation.pillWidth ?? calendarPillWidth
+        let height = overlayPresentation.pillHeight ?? DragOverlayPresentationResolver.defaultPillHeight
+        let center: CGPoint
+
+        if let activeDate = snapshot.activeDate,
+           let cell = calendarFrames(for: visibleScope).first(where: { $0.date.isSameDay(as: activeDate) }) {
+            center = CGPoint(x: cell.frameGlobal.midX, y: cell.frameGlobal.midY)
+        } else {
+            center = CGPoint(x: baseFrame.midX, y: baseFrame.midY)
+        }
+
+        return CGRect(
+            x: center.x - width / 2,
+            y: center.y - height / 2,
+            width: width,
+            height: height
+        )
+    }
+
+    private func landingTargetFrame(for commit: DragSessionCommit) -> CGRect? {
+        guard let timelineLayout,
+              let sourceFrame = snapshot.source?.originalFrameGlobal else {
+            return nil
+        }
+
+        let startMinute = minuteOfDay(for: commit.start)
+        let endMinute = minuteOfDay(for: commit.end)
+        let yPosition = timelineLayout.frameGlobal.minY - timelineLayout.scrollOffsetY
+            + (CGFloat(startMinute) / 60.0) * timelineLayout.hourHeight
+        let height = max((CGFloat(endMinute - startMinute) / 60.0) * timelineLayout.hourHeight - 1, 16)
+
+        return CGRect(
+            x: sourceFrame.minX,
+            y: yPosition,
+            width: sourceFrame.width,
+            height: height
+        )
+    }
+
+    private func resolvedCalendarPillWidth(from sourceFrame: CGRect) -> CGFloat {
+        let scaled = sourceFrame.width * 0.28
+        return min(max(scaled, DragOverlayPresentationResolver.defaultPillWidth), 64)
+    }
+
+    private func withoutAnimation(_ updates: () -> Void) {
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
+            updates()
+        }
     }
 
     private func minuteOfDay(for date: Date) -> Int {

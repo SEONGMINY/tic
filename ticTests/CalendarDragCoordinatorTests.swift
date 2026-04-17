@@ -42,12 +42,28 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(commit?.end, movedEndDate)
     }
 
+    func testReturningToDayAfterCalendarRoundTripCommitsThroughTimelineDrop() {
+        let coordinator = makeCoordinator()
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        coordinator.updateVisibleScope(.month)
+        coordinator.updateVisibleScope(.day)
+
+        let commit = coordinator.completeTimelineDrop()
+
+        XCTAssertEqual(commit?.itemId, item.id)
+        XCTAssertEqual(commit?.start, movedStartDate)
+        XCTAssertEqual(commit?.end, movedEndDate)
+    }
+
     func testSameDayDropCommitsThroughLocalPath() {
         let coordinator = makeCoordinator()
         let item = makeItem()
 
         beginDrag(coordinator, item: item)
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
 
         XCTAssertEqual(coordinator.dropOwner, .localDayTimeline)
         XCTAssertTrue(coordinator.shouldHandleDropLocally)
@@ -60,8 +76,37 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(commit?.end, movedEndDate)
     }
 
-    func testPlaceholderClearsAfterGlobalSessionEnds() {
+    func testUpdateActiveDragPromotesCalendarCandidateAfterExplicitScopeTransition() {
         let coordinator = makeCoordinator()
+        let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let dropPoint = CGPoint(x: 260, y: 100)
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
+        coordinator.updateVisibleScope(.month)
+        coordinator.updateActiveDrag(pointerGlobal: dropPoint)
+
+        XCTAssertEqual(coordinator.dropOwner, .rootCoordinator)
+        XCTAssertTrue(coordinator.shouldHandleDragGlobally)
+        XCTAssertEqual(coordinator.snapshot.currentScope, .month)
+        XCTAssertEqual(coordinator.snapshot.activeDate, dropDate.startOfDay)
+        XCTAssertTrue(coordinator.snapshot.droppable)
+    }
+
+    func testPlaceholderClearsAfterGlobalSessionEnds() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
         let item = makeItem()
 
         beginDrag(coordinator, item: item)
@@ -74,6 +119,8 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isSessionVisible)
 
         _ = coordinator.completeGlobalDrag()
+
+        waitForCleanup()
 
         XCTAssertFalse(coordinator.snapshot.placeholderVisible)
         XCTAssertFalse(coordinator.isShowingPlaceholder(for: item.id))
@@ -123,7 +170,14 @@ final class CalendarDragCoordinatorTests: XCTestCase {
     }
 
     func testScopeRoundTripGlobalDropReturnsCommittedDayState() {
-        let coordinator = makeCoordinator()
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
         let item = makeItem()
         let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
         let dropPoint = CGPoint(x: 260, y: 100)
@@ -159,7 +213,14 @@ final class CalendarDragCoordinatorTests: XCTestCase {
     }
 
     func testStaleCalendarFrameRegistryDoesNotLeakIntoNextSession() {
-        let coordinator = makeCoordinator()
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
         let item = makeItem()
         let staleDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 18))!
         let stalePoint = CGPoint(x: 260, y: 100)
@@ -177,6 +238,7 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.snapshot.activeDate, staleDate.startOfDay)
 
         _ = coordinator.completeGlobalDrag()
+        waitForCleanup()
 
         beginDrag(coordinator, item: item)
         coordinator.updateDayDrag(pointerGlobal: movedPointer)
@@ -185,6 +247,56 @@ final class CalendarDragCoordinatorTests: XCTestCase {
 
         XCTAssertNil(coordinator.snapshot.activeDate)
         XCTAssertFalse(coordinator.snapshot.droppable)
+    }
+
+    func testBeginDragStartsLiftPresentationThenAdvancesToFloating() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 40,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+
+        beginDrag(coordinator, item: makeItem())
+
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .lifted)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
+
+        coordinator.updateDayDrag(pointerGlobal: movedPointer)
+        wait(forSeconds: 0.08)
+
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
+    }
+
+    func testMonthTransitionHoldsCardBeforeBecomingCalendarPill() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
+        coordinator.updateVisibleScope(.month)
+
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .holding)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
+
+        waitForCleanup()
+
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
     }
 
     private var selectedDate: Date {
@@ -215,11 +327,17 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         )!
     }
 
-    private func makeCoordinator(restoreAnimationMs: Int = 220) -> CalendarDragCoordinator {
+    private func makeCoordinator(
+        restoreAnimationMs: Int = 220,
+        overlayTimings: DragOverlayAnimationTimings = .baseline
+    ) -> CalendarDragCoordinator {
         var params = DragSessionParams.baseline
         params.restoreAnimationMs = restoreAnimationMs
 
-        let coordinator = CalendarDragCoordinator(params: params)
+        let coordinator = CalendarDragCoordinator(
+            params: params,
+            overlayTimings: overlayTimings
+        )
         coordinator.updateVisibleDay(selectedDate)
         coordinator.updateTimelineLayout(
             frameGlobal: CGRect(x: 52, y: 120, width: 280, height: 1440),
@@ -240,11 +358,19 @@ final class CalendarDragCoordinatorTests: XCTestCase {
     }
 
     private func waitForRestoreCleanup() {
-        let expectation = expectation(description: "restore cleanup")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        waitForCleanup()
+    }
+
+    private func waitForCleanup() {
+        wait(forSeconds: 0.05)
+    }
+
+    private func wait(forSeconds seconds: TimeInterval) {
+        let expectation = expectation(description: "delayed work")
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
             expectation.fulfill()
         }
-        wait(for: [expectation], timeout: 0.2)
+        wait(for: [expectation], timeout: max(seconds * 4, 0.2))
     }
 
     private func expectedStartDate(

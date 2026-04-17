@@ -32,6 +32,7 @@ struct TimelineView: View {
     var onDeleteItem: (TicItem) -> Void
     var onCompleteItem: (TicItem) -> Void
     var onTimelineLayoutChange: (_ frameGlobal: CGRect, _ scrollOffsetY: CGFloat) -> Void
+    var onBeginMoveDrag: (_ item: TicItem, _ sourceFrameGlobal: CGRect, _ startPointerGlobal: CGPoint, _ currentPointerGlobal: CGPoint) -> Bool
 
     // Edit mode
     @Binding var editingItemId: String?
@@ -114,17 +115,19 @@ struct TimelineView: View {
                                     return .gray
                                 }()
 
-                                if dragCoordinator.isShowingPlaceholder(for: item.id) {
+                                if let placeholderOpacity = dragCoordinator.sourcePlaceholderOpacity(for: item.id) {
                                     blockContent(
                                         for: item,
                                         bgColor: editBgColor,
                                         width: max(editWidth - 2, 0),
                                         height: max(baseHeight - 1, 16)
                                     )
-                                    .opacity(0.32)
+                                    .opacity(placeholderOpacity)
                                     .overlay {
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                        if placeholderOpacity > 0.05 {
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                        }
                                     }
                                     .offset(x: editXPos, y: baseYPos)
                                     .allowsHitTesting(false)
@@ -147,20 +150,16 @@ struct TimelineView: View {
                                         onResizeItem: onResizeItem,
                                         onMoveItem: onMoveItem,
                                         onDuplicateItem: onDuplicateItem,
-                                        onMoveGestureBegan: { frameGlobal, pointerGlobal in
-                                            dragCoordinator.beginDayDrag(
-                                                item: item,
-                                                sourceFrameGlobal: frameGlobal,
-                                                pointerGlobal: pointerGlobal
+                                        onMoveGestureBegan: { frameGlobal, startPointerGlobal, currentPointerGlobal in
+                                            onBeginMoveDrag(
+                                                item,
+                                                frameGlobal,
+                                                startPointerGlobal,
+                                                currentPointerGlobal
                                             )
                                         },
                                         onMoveGestureChanged: { pointerGlobal in
-                                            dragCoordinator.updateDayDrag(pointerGlobal: pointerGlobal)
-                                        },
-                                        onMoveGestureEnded: {
-                                            if let commit = dragCoordinator.completeLocalDrag() {
-                                                onMoveItem(item.id, commit.start, commit.end)
-                                            }
+                                            dragCoordinator.updateActiveDrag(pointerGlobal: pointerGlobal)
                                         }
                                     )
                                 }
