@@ -128,6 +128,70 @@ struct DragDropResult: Equatable {
     }
 }
 
+enum DragOwnershipHandoffPhase: String, Equatable {
+    case idle
+    case localPreview
+    case rootClaimPending
+    case rootClaimAcquired
+    case landing
+    case restoring
+}
+
+struct DragOwnershipHandoffState: Equatable {
+    var phase: DragOwnershipHandoffPhase
+    var token: DragTouchClaimToken?
+    var owner: DragTouchClaimOwner
+    var restoreReason: DragTouchClaimRestoreReason?
+    var claimSnapshot: DragTouchClaimSnapshot?
+
+    static let idle = Self(
+        phase: .idle,
+        token: nil,
+        owner: .none,
+        restoreReason: nil,
+        claimSnapshot: nil
+    )
+
+    var isLocalPreviewActive: Bool {
+        phase == .localPreview || phase == .rootClaimPending
+    }
+
+    var isRootClaimPending: Bool {
+        phase == .rootClaimPending
+    }
+
+    var isRootClaimAcquired: Bool {
+        switch phase {
+        case .rootClaimAcquired:
+            return true
+        case .landing, .restoring:
+            return owner == .root
+        case .idle, .localPreview, .rootClaimPending:
+            return false
+        }
+    }
+
+    var showsPlaceholder: Bool {
+        isRootClaimAcquired
+    }
+
+    var allowsCalendarHover: Bool {
+        phase == .rootClaimAcquired || (phase == .landing && owner == .root)
+    }
+
+    var canHandleLocalDayDrop: Bool {
+        phase == .localPreview || phase == .rootClaimPending
+    }
+
+    var canHandleGlobalDrag: Bool {
+        phase == .rootClaimAcquired
+    }
+
+    var dropOwner: DragDropOwner {
+        isRootClaimAcquired ? .rootCoordinator : .localDayTimeline
+    }
+}
+
 struct DragSessionSnapshot: Equatable {
     var params: DragSessionParams
     var state: DragSessionState

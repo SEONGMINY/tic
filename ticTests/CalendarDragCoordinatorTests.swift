@@ -20,17 +20,76 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         )
     }
 
+    func testBeginDragCreatesPendingLocalPreviewWithoutDeadlock() {
+        let coordinator = makeCoordinator()
+
+        beginDrag(coordinator, item: makeItem())
+
+        XCTAssertEqual(coordinator.handoffState.phase, .rootClaimPending)
+        XCTAssertTrue(coordinator.handoffState.isLocalPreviewActive)
+        XCTAssertTrue(coordinator.handoffState.isRootClaimPending)
+        XCTAssertEqual(coordinator.currentHandoffOwner, .localPreview)
+        XCTAssertNotNil(coordinator.currentHandoffToken)
+        XCTAssertEqual(coordinator.dropOwner, .localDayTimeline)
+        XCTAssertTrue(coordinator.shouldHandleDropLocally)
+        XCTAssertFalse(coordinator.shouldHandleDragGlobally)
+        XCTAssertNil(coordinator.sourcePlaceholderOpacity(for: "event-1"))
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .lifted)
+    }
+
+    func testClaimSuccessEnablesRootOwnerAndPlaceholderOnlyAfterSuccess() {
+        let coordinator = makeCoordinator()
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+
+        XCTAssertFalse(coordinator.isShowingPlaceholder(for: item.id))
+        XCTAssertEqual(coordinator.currentHandoffOwner, .localPreview)
+
+        let token = currentToken(for: coordinator)
+        let result = coordinator.applyRootClaimSuccess(
+            for: token,
+            at: timestamp(frame: 11, uptimeMs: 116)
+        )
+
+        XCTAssertEqual(result, .applied)
+        XCTAssertEqual(coordinator.handoffState.phase, .rootClaimAcquired)
+        XCTAssertTrue(coordinator.handoffState.isRootClaimAcquired)
+        XCTAssertEqual(coordinator.currentHandoffOwner, .root)
+        XCTAssertEqual(coordinator.dropOwner, .rootCoordinator)
+        XCTAssertTrue(coordinator.shouldHandleDragGlobally)
+        XCTAssertFalse(coordinator.shouldHandleDropLocally)
+        XCTAssertTrue(coordinator.isShowingPlaceholder(for: item.id))
+        XCTAssertNotNil(coordinator.sourcePlaceholderOpacity(for: item.id))
+    }
+
+    func testSameDayDropStillCommitsThroughLocalPreviewWhileClaimPending() {
+        let coordinator = makeCoordinator()
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+
+        let commit = coordinator.completeLocalDrag()
+
+        XCTAssertEqual(commit?.itemId, item.id)
+        XCTAssertEqual(commit?.start, movedStartDate)
+        XCTAssertEqual(commit?.end, movedEndDate)
+    }
+
     func testReturningToDayAfterRootOwnershipDoesNotCommitLocally() {
         let coordinator = makeCoordinator()
         let item = makeItem()
 
         beginDrag(coordinator, item: item)
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        claimSuccess(coordinator)
+
         coordinator.updateVisibleScope(.month)
         coordinator.updateVisibleScope(.day)
 
         XCTAssertEqual(coordinator.dropOwner, .rootCoordinator)
-        XCTAssertTrue(coordinator.snapshot.droppable)
         XCTAssertFalse(coordinator.shouldHandleDropLocally)
         XCTAssertTrue(coordinator.shouldHandleDragGlobally)
         XCTAssertNil(coordinator.completeLocalDrag())
@@ -42,42 +101,15 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(commit?.end, movedEndDate)
     }
 
-    func testReturningToDayAfterCalendarRoundTripCommitsThroughTimelineDrop() {
-        let coordinator = makeCoordinator()
-        let item = makeItem()
-
-        beginDrag(coordinator, item: item)
-        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
-        coordinator.updateVisibleScope(.month)
-        coordinator.updateVisibleScope(.day)
-
-        let commit = coordinator.completeTimelineDrop()
-
-        XCTAssertEqual(commit?.itemId, item.id)
-        XCTAssertEqual(commit?.start, movedStartDate)
-        XCTAssertEqual(commit?.end, movedEndDate)
-    }
-
-    func testSameDayDropCommitsThroughLocalPath() {
-        let coordinator = makeCoordinator()
-        let item = makeItem()
-
-        beginDrag(coordinator, item: item)
-        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
-
-        XCTAssertEqual(coordinator.dropOwner, .localDayTimeline)
-        XCTAssertTrue(coordinator.shouldHandleDropLocally)
-        XCTAssertFalse(coordinator.shouldHandleDragGlobally)
-
-        let commit = coordinator.completeLocalDrag()
-
-        XCTAssertEqual(commit?.itemId, item.id)
-        XCTAssertEqual(commit?.start, movedStartDate)
-        XCTAssertEqual(commit?.end, movedEndDate)
-    }
-
-    func testUpdateActiveDragPromotesCalendarCandidateAfterExplicitScopeTransition() {
-        let coordinator = makeCoordinator()
+    func testMonthHoverStaysDisabledUntilClaimSuccess() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
         let item = makeItem()
         let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
         let dropPoint = CGPoint(x: 260, y: 100)
@@ -91,11 +123,94 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         coordinator.updateVisibleScope(.month)
         coordinator.updateActiveDrag(pointerGlobal: dropPoint)
 
-        XCTAssertEqual(coordinator.dropOwner, .rootCoordinator)
-        XCTAssertTrue(coordinator.shouldHandleDragGlobally)
-        XCTAssertEqual(coordinator.snapshot.currentScope, .month)
+        XCTAssertNil(coordinator.snapshot.activeDate)
+        XCTAssertFalse(coordinator.handoffState.allowsCalendarHover)
+        XCTAssertFalse(coordinator.shouldHandleDragGlobally)
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .holding)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
+
+        claimSuccess(coordinator, frame: 11, uptimeMs: 116)
+        waitForCleanup()
+
         XCTAssertEqual(coordinator.snapshot.activeDate, dropDate.startOfDay)
-        XCTAssertTrue(coordinator.snapshot.droppable)
+        XCTAssertTrue(coordinator.handoffState.allowsCalendarHover)
+        XCTAssertTrue(coordinator.shouldHandleDragGlobally)
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
+    }
+
+    func testClaimTimeoutRestoresSessionThroughRestorePath() {
+        let coordinator = makeCoordinator(
+            restoreAnimationMs: 1,
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+
+        beginDrag(coordinator, item: makeItem())
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+
+        let result = coordinator.expirePendingRootClaimIfNeeded(
+            at: timestamp(frame: 13, uptimeMs: 150)
+        )
+
+        XCTAssertEqual(result, .applied)
+        XCTAssertEqual(coordinator.handoffState.phase, .restoring)
+        XCTAssertEqual(coordinator.handoffState.restoreReason, .timeout)
+        XCTAssertEqual(coordinator.currentHandoffOwner, .localPreview)
+        XCTAssertFalse(coordinator.isShowingPlaceholder(for: "event-1"))
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .restoring)
+
+        waitForRestoreCleanup()
+
+        XCTAssertEqual(coordinator.snapshot.state, .idle)
+        XCTAssertEqual(coordinator.handoffState.phase, .idle)
+        XCTAssertEqual(coordinator.lastSessionTermination, .cancelled)
+        XCTAssertFalse(coordinator.isSessionVisible)
+    }
+
+    func testStaleTokenSuccessDoesNotContaminateCurrentSession() {
+        let coordinator = makeCoordinator()
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        let staleToken = currentToken(for: coordinator)
+
+        beginDrag(coordinator, item: item)
+        let currentToken = currentToken(for: coordinator)
+
+        let result = coordinator.applyRootClaimSuccess(
+            for: staleToken,
+            at: timestamp(frame: 12, uptimeMs: 132)
+        )
+
+        XCTAssertEqual(result, .staleIgnored)
+        XCTAssertEqual(coordinator.currentHandoffToken, currentToken)
+        XCTAssertEqual(coordinator.handoffState.phase, .rootClaimPending)
+        XCTAssertEqual(coordinator.currentHandoffOwner, .localPreview)
+        XCTAssertFalse(coordinator.shouldHandleDragGlobally)
+    }
+
+    func testStaleTokenEndDoesNotContaminateCurrentSession() {
+        let coordinator = makeCoordinator()
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        let staleToken = currentToken(for: coordinator)
+
+        beginDrag(coordinator, item: item)
+        let currentToken = currentToken(for: coordinator)
+
+        let result = coordinator.applyRootClaimEnd(for: staleToken)
+
+        XCTAssertEqual(result, .staleIgnored)
+        XCTAssertEqual(coordinator.currentHandoffToken, currentToken)
+        XCTAssertEqual(coordinator.handoffState.phase, .rootClaimPending)
+        XCTAssertEqual(coordinator.currentHandoffOwner, .localPreview)
+        XCTAssertFalse(coordinator.shouldHandleDragGlobally)
     }
 
     func testPlaceholderClearsAfterGlobalSessionEnds() {
@@ -110,63 +225,51 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         let item = makeItem()
 
         beginDrag(coordinator, item: item)
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        claimSuccess(coordinator)
         coordinator.updateVisibleScope(.month)
         coordinator.updateVisibleScope(.day)
 
-        XCTAssertTrue(coordinator.snapshot.placeholderVisible)
         XCTAssertTrue(coordinator.isShowingPlaceholder(for: item.id))
         XCTAssertTrue(coordinator.isSessionVisible)
 
         _ = coordinator.completeGlobalDrag()
-
         waitForCleanup()
 
-        XCTAssertFalse(coordinator.snapshot.placeholderVisible)
         XCTAssertFalse(coordinator.isShowingPlaceholder(for: item.id))
+        XCTAssertEqual(coordinator.handoffState.phase, .idle)
         XCTAssertFalse(coordinator.isSessionVisible)
         XCTAssertNil(coordinator.sessionItem)
     }
 
-    func testInvalidGlobalDropRestoresAndCleansUpToIdle() {
-        let coordinator = makeCoordinator(restoreAnimationMs: 1)
+    func testMonthTransitionKeepsHoldingCardUntilRootClaimSuccessThenBecomesCalendarPill() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
         let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
 
         beginDrag(coordinator, item: item)
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
         coordinator.updateVisibleScope(.month)
 
-        XCTAssertTrue(coordinator.shouldHandleDragGlobally)
-        XCTAssertTrue(coordinator.snapshot.placeholderVisible)
-        XCTAssertTrue(coordinator.isSessionVisible)
-        XCTAssertNil(coordinator.completeGlobalDrag())
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .holding)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
 
-        waitForRestoreCleanup()
+        claimSuccess(coordinator)
+        waitForCleanup()
 
-        XCTAssertEqual(coordinator.snapshot.state, .idle)
-        XCTAssertEqual(coordinator.lastSessionTermination, .invalidDropRestored)
-        XCTAssertFalse(coordinator.snapshot.placeholderVisible)
-        XCTAssertFalse(coordinator.isSessionVisible)
-        XCTAssertNil(coordinator.sessionItem)
-    }
-
-    func testCancelEndsWithoutCommit() {
-        let coordinator = makeCoordinator(restoreAnimationMs: 1)
-        let item = makeItem()
-
-        beginDrag(coordinator, item: item)
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
-
-        coordinator.cancelDrag()
-        let commitAfterCancel = coordinator.completeLocalDrag()
-
-        waitForRestoreCleanup()
-
-        XCTAssertNil(commitAfterCancel)
-        XCTAssertEqual(coordinator.snapshot.state, .idle)
-        XCTAssertEqual(coordinator.lastSessionTermination, .cancelled)
-        XCTAssertFalse(coordinator.isSessionVisible)
-        XCTAssertFalse(coordinator.isShowingPlaceholder(for: item.id))
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
     }
 
     func testScopeRoundTripGlobalDropReturnsCommittedDayState() {
@@ -189,7 +292,8 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         ]
 
         beginDrag(coordinator, item: item)
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        claimSuccess(coordinator)
         coordinator.updateCalendarFrames(monthFrames, scope: .month)
         coordinator.updateCalendarFrames(yearFrames, scope: .year)
 
@@ -210,93 +314,6 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(state?.selectedDate, dropDate.startOfDay)
         XCTAssertEqual(state?.displayedMonth, dropDate.startOfMonth)
         XCTAssertEqual(state?.displayedYear, dropDate.year)
-    }
-
-    func testStaleCalendarFrameRegistryDoesNotLeakIntoNextSession() {
-        let coordinator = makeCoordinator(
-            overlayTimings: DragOverlayAnimationTimings(
-                liftDurationMs: 1,
-                scopeHoldDurationMs: 1,
-                pillTransitionDurationMs: 1,
-                landingDurationMs: 1
-            )
-        )
-        let item = makeItem()
-        let staleDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 18))!
-        let stalePoint = CGPoint(x: 260, y: 100)
-        let staleFrames = [
-            DateCellFrame(date: staleDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
-        ]
-
-        coordinator.updateCalendarFrames(staleFrames, scope: .month)
-
-        beginDrag(coordinator, item: item)
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
-        coordinator.updateVisibleScope(.month)
-        coordinator.updateGlobalDrag(pointerGlobal: stalePoint)
-
-        XCTAssertEqual(coordinator.snapshot.activeDate, staleDate.startOfDay)
-
-        _ = coordinator.completeGlobalDrag()
-        waitForCleanup()
-
-        beginDrag(coordinator, item: item)
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
-        coordinator.updateVisibleScope(.month)
-        coordinator.updateGlobalDrag(pointerGlobal: stalePoint)
-
-        XCTAssertNil(coordinator.snapshot.activeDate)
-        XCTAssertFalse(coordinator.snapshot.droppable)
-    }
-
-    func testBeginDragStartsLiftPresentationThenAdvancesToFloating() {
-        let coordinator = makeCoordinator(
-            overlayTimings: DragOverlayAnimationTimings(
-                liftDurationMs: 40,
-                scopeHoldDurationMs: 1,
-                pillTransitionDurationMs: 1,
-                landingDurationMs: 1
-            )
-        )
-
-        beginDrag(coordinator, item: makeItem())
-
-        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .lifted)
-        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
-
-        coordinator.updateDayDrag(pointerGlobal: movedPointer)
-        wait(forSeconds: 0.08)
-
-        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
-        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
-    }
-
-    func testMonthTransitionHoldsCardBeforeBecomingCalendarPill() {
-        let coordinator = makeCoordinator(
-            overlayTimings: DragOverlayAnimationTimings(
-                liftDurationMs: 1,
-                scopeHoldDurationMs: 1,
-                pillTransitionDurationMs: 1,
-                landingDurationMs: 1
-            )
-        )
-        let item = makeItem()
-        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
-        let monthFrames = [
-            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
-        ]
-
-        beginDrag(coordinator, item: item)
-        coordinator.updateCalendarFrames(monthFrames, scope: .month)
-        coordinator.updateVisibleScope(.month)
-
-        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .holding)
-        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
-
-        waitForCleanup()
-
-        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
-        XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
     }
 
     private var selectedDate: Date {
@@ -353,8 +370,36 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         coordinator.beginDayDrag(
             item: item,
             sourceFrameGlobal: sourceFrame,
-            pointerGlobal: startPointer
+            pointerGlobal: startPointer,
+            claimTimestamp: timestamp(frame: 10, uptimeMs: 100)
         )
+    }
+
+    private func claimSuccess(
+        _ coordinator: CalendarDragCoordinator,
+        frame: Int = 11,
+        uptimeMs: Int = 116
+    ) {
+        let token = currentToken(for: coordinator)
+        XCTAssertEqual(
+            coordinator.applyRootClaimSuccess(
+                for: token,
+                at: timestamp(frame: frame, uptimeMs: uptimeMs)
+            ),
+            .applied
+        )
+    }
+
+    private func currentToken(for coordinator: CalendarDragCoordinator) -> DragTouchClaimToken {
+        guard let token = coordinator.currentHandoffToken else {
+            XCTFail("Missing current touch claim token")
+            return DragTouchClaimToken(rawValue: .max)
+        }
+        return token
+    }
+
+    private func timestamp(frame: Int, uptimeMs: Int) -> DragTouchClaimTimestamp {
+        DragTouchClaimTimestamp(frameIndex: frame, uptimeMs: uptimeMs)
     }
 
     private func waitForRestoreCleanup() {

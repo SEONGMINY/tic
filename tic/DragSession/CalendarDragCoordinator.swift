@@ -58,7 +58,7 @@ final class CalendarDragCoordinator {
     private(set) var placeholderItemId: String?
     private(set) var displayedOverlayFrameGlobal: CGRect?
     private(set) var overlayPresentation: DragOverlayPresentation = .inactive
-    private(set) var dropOwner: DragDropOwner = .localDayTimeline
+    private(set) var handoffState: DragOwnershipHandoffState = .idle
     private(set) var lastSessionTermination: DragSessionTermination?
     private(set) var sessionTerminationCount = 0
 
@@ -72,6 +72,8 @@ final class CalendarDragCoordinator {
     private var restoreCleanupWorkItem: DispatchWorkItem?
     private var landingCleanupWorkItem: DispatchWorkItem?
     private var pendingLandingCommit: DragSessionCommit?
+    private var touchClaimHandoff = DragTouchClaimHandoff()
+    private var claimFrameIndex = 0
 
     init(
         params: DragSessionParams = .baseline,
@@ -132,6 +134,22 @@ final class CalendarDragCoordinator {
         engine.snapshot
     }
 
+    var dropOwner: DragDropOwner {
+        handoffState.dropOwner
+    }
+
+    var currentHandoffToken: DragTouchClaimToken? {
+        handoffState.token
+    }
+
+    var currentHandoffOwner: DragTouchClaimOwner {
+        handoffState.owner
+    }
+
+    var currentClaimSnapshot: DragTouchClaimSnapshot? {
+        handoffState.claimSnapshot
+    }
+
     var sessionItem: TicItem? {
         draggedItem
     }
@@ -149,14 +167,13 @@ final class CalendarDragCoordinator {
     }
 
     var shouldHandleDragGlobally: Bool {
-        dropOwner.handlesGlobalDrop(hasActiveSession: isGestureSessionActive)
+        handoffState.canHandleGlobalDrag && isGestureSessionActive
     }
 
     var shouldHandleDropLocally: Bool {
-        dropOwner.handlesLocalDrop(
-            in: snapshot.currentScope,
-            hasActiveSession: isGestureSessionActive
-        )
+        handoffState.canHandleLocalDayDrop
+            && isGestureSessionActive
+            && snapshot.currentScope == .day
     }
 
     var hasActiveSession: Bool {
@@ -164,7 +181,12 @@ final class CalendarDragCoordinator {
     }
 
     func sourcePlaceholderOpacity(for itemId: String?) -> Double? {
-        guard let itemId, itemId == placeholderItemId, hasActiveSession else { return nil }
+        guard let itemId,
+              itemId == placeholderItemId,
+              hasActiveSession,
+              handoffState.showsPlaceholder else {
+            return nil
+        }
         return overlayPresentation.sourcePlaceholderOpacity
     }
 
@@ -182,17 +204,12 @@ final class CalendarDragCoordinator {
             return
         }
 
-        dropOwner = DragDropOwner.nextOwner(
-            afterShowing: dragScope,
-            currentOwner: dropOwner
-        )
-
         engine.updateScope(
             dragScope,
             visibleDayDate: visibleDayDate,
             pointerGlobal: engine.snapshot.pointerGlobal,
             timelineLayout: timelineLayout,
-            calendarFrames: calendarFrames(for: dragScope)
+            calendarFrames: hoverEnabledCalendarFrames(for: dragScope)
         )
         updatePresentationForScopeChange(to: dragScope)
         syncDisplayedOverlayFrame(animated: dragScope != .day && overlayPresentation.style == .calendarPill)
@@ -236,7 +253,7 @@ final class CalendarDragCoordinator {
             visibleDayDate: visibleDayDate,
             pointerGlobal: pointer,
             timelineLayout: timelineLayout,
-            calendarFrames: frames
+            calendarFrames: hoverEnabledCalendarFrames(for: scope)
         )
         syncDisplayedOverlayFrame(animated: overlayPresentation.style == .calendarPill && snapshot.activeDate != nil)
     }
@@ -273,6 +290,20 @@ final class CalendarDragCoordinator {
     func beginDayDrag(
         item: TicItem,
         sourceFrameGlobal: CGRect,
+        pointerGlobal: CGPoint,
+        claimTimestamp: DragTouchClaimTimestamp? = nil
+    ) {
+        startLocalPreviewDrag(
+            item: item,
+            sourceFrameGlobal: sourceFrameGlobal,
+            pointerGlobal: pointerGlobal
+        )
+        _ = requestRootClaim(at: claimTimestamp)
+    }
+
+    func startLocalPreviewDrag(
+        item: TicItem,
+        sourceFrameGlobal: CGRect,
         pointerGlobal: CGPoint
     ) {
         guard let startDate = item.startDate,
@@ -302,12 +333,94 @@ final class CalendarDragCoordinator {
 
         draggedItem = item
         placeholderItemId = item.id
-        dropOwner = .localDayTimeline
         visibleScope = .day
         calendarPillWidth = resolvedCalendarPillWidth(from: sourceFrameGlobal)
         overlayPresentation = resolvedPresentation(for: .lifted)
+        handoffState = DragOwnershipHandoffState(
+            phase: .localPreview,
+            token: nil,
+            owner: .localPreview,
+            restoreReason: nil,
+            claimSnapshot: nil
+        )
         syncDisplayedOverlayFrame()
         scheduleLiftAdvance()
+    }
+
+    @discardableResult
+    func requestRootClaim(
+        at timestamp: DragTouchClaimTimestamp? = nil
+    ) -> DragTouchClaimToken? {
+        guard draggedItem != nil else { return nil }
+
+        switch handoffState.phase {
+        case .localPreview:
+            let token = touchClaimHandoff.beginLocalPreview(at: timestamp ?? nextClaimTimestamp())
+            handoffState = resolvedHandoffState(for: .rootClaimPending)
+            return token
+        case .rootClaimPending, .rootClaimAcquired, .landing, .restoring:
+            return handoffState.token
+        case .idle:
+            return nil
+        }
+    }
+
+    @discardableResult
+    func applyRootClaimSuccess(
+        for token: DragTouchClaimToken,
+        at timestamp: DragTouchClaimTimestamp? = nil
+    ) -> DragTouchClaimEventResult {
+        let result = touchClaimHandoff.reportClaimSucceeded(
+            for: token,
+            at: timestamp ?? nextClaimTimestamp()
+        )
+
+        switch result {
+        case .applied:
+            handoffState = resolvedHandoffState(for: .rootClaimAcquired)
+            activateCalendarHoverIfNeeded()
+            updatePresentationAfterRootClaimSuccess()
+        case .ignored:
+            beginRestoreAfterFinishedClaimIfNeeded()
+        case .staleIgnored:
+            break
+        }
+
+        return result
+    }
+
+    @discardableResult
+    func applyRootClaimCancellation(
+        for token: DragTouchClaimToken,
+        at timestamp: DragTouchClaimTimestamp? = nil
+    ) -> DragTouchClaimEventResult {
+        let result = touchClaimHandoff.reportClaimCancelled(
+            for: token,
+            at: timestamp ?? nextClaimTimestamp()
+        )
+
+        if result == .applied {
+            beginRestoreAfterClaimFailure()
+        }
+        return result
+    }
+
+    @discardableResult
+    func applyRootClaimEnd(
+        for token: DragTouchClaimToken
+    ) -> DragTouchClaimEventResult {
+        touchClaimHandoff.reportClaimEnded(for: token)
+    }
+
+    @discardableResult
+    func expirePendingRootClaimIfNeeded(
+        at timestamp: DragTouchClaimTimestamp
+    ) -> DragTouchClaimEventResult {
+        let result = touchClaimHandoff.expirePendingClaimIfNeeded(at: timestamp)
+        if result == .applied {
+            beginRestoreAfterClaimFailure()
+        }
+        return result
     }
 
     func updateDayDrag(pointerGlobal: CGPoint) {
@@ -330,7 +443,7 @@ final class CalendarDragCoordinator {
             engine.dragMoved(
                 to: pointerGlobal,
                 timestampMs: nowTimestampMs(),
-                calendarFrames: calendarFrames(for: engine.snapshot.currentScope)
+                calendarFrames: hoverEnabledCalendarFrames(for: engine.snapshot.currentScope)
             )
             syncDisplayedOverlayFrame(animated: overlayPresentation.style == .calendarPill && snapshot.activeDate != nil)
         }
@@ -359,7 +472,14 @@ final class CalendarDragCoordinator {
 
     func cancelDrag() {
         guard isCommitLandingPendingOrRunning == false else { return }
+        if let token = handoffState.token {
+            _ = touchClaimHandoff.reportClaimCancelled(
+                for: token,
+                at: nextClaimTimestamp()
+            )
+        }
         let snapshot = engine.cancel(timestampMs: nowTimestampMs())
+        handoffState = resolvedHandoffState(for: .restoring)
         updatePresentation(to: .restoring, animated: true)
         syncDisplayedOverlayFrame()
         if snapshot.state == .restoring {
@@ -369,7 +489,7 @@ final class CalendarDragCoordinator {
 
     func isShowingPlaceholder(for itemId: String?) -> Bool {
         guard let itemId else { return false }
-        return placeholderItemId == itemId
+        return placeholderItemId == itemId && handoffState.showsPlaceholder
     }
 
     private func completeActiveDrag() -> DragSessionCommit? {
@@ -394,6 +514,7 @@ final class CalendarDragCoordinator {
         }
 
         if snapshot.state == .restoring {
+            handoffState = resolvedHandoffState(for: .restoring)
             updatePresentation(to: .restoring, animated: true)
             scheduleRestoreCleanup()
         }
@@ -423,6 +544,7 @@ final class CalendarDragCoordinator {
     }
 
     private func finishSession(_ termination: DragSessionTermination) {
+        endCurrentHandoffSessionIfNeeded()
         lastSessionTermination = termination
         sessionTerminationCount += 1
         resetSession()
@@ -450,7 +572,7 @@ final class CalendarDragCoordinator {
         pendingLandingCommit = nil
         displayedOverlayFrameGlobal = nil
         overlayPresentation = .inactive
-        dropOwner = .localDayTimeline
+        handoffState = .idle
         visibleScope = .day
         calendarPillWidth = DragOverlayPresentationResolver.defaultPillWidth
         calendarFramesByScope[.month] = nil
@@ -484,7 +606,9 @@ final class CalendarDragCoordinator {
         }
 
         updatePresentation(to: .holding, animated: true)
-        scheduleCalendarPillAdvance(for: scope)
+        if handoffState.isRootClaimAcquired {
+            scheduleCalendarPillAdvance(for: scope)
+        }
     }
 
     private func scheduleLiftAdvance() {
@@ -510,6 +634,7 @@ final class CalendarDragCoordinator {
             guard self.pendingLandingCommit == nil else { return }
             guard self.visibleScope == scope else { return }
             guard self.snapshot.currentScope == scope else { return }
+            guard self.handoffState.isRootClaimAcquired else { return }
             self.updatePresentation(to: .floating, animated: true)
             self.syncDisplayedOverlayFrame(animated: self.snapshot.activeDate != nil)
         }
@@ -527,6 +652,7 @@ final class CalendarDragCoordinator {
         guard let targetFrame = landingTargetFrame(for: pendingLandingCommit) else { return }
 
         phaseAdvanceWorkItem?.cancel()
+        handoffState = resolvedHandoffState(for: .landing)
         updatePresentation(to: .landing, animated: true)
         withAnimation(.spring(duration: Double(overlayTimings.landingDurationMs) / 1000.0, bounce: 0.08)) {
             displayedOverlayFrameGlobal = targetFrame
@@ -547,6 +673,104 @@ final class CalendarDragCoordinator {
 
     private var isCommitLandingPendingOrRunning: Bool {
         pendingLandingCommit != nil || landingCleanupWorkItem != nil
+    }
+
+    private func hoverEnabledCalendarFrames(for scope: DragSessionScope) -> [DateCellFrame] {
+        guard handoffState.allowsCalendarHover else { return [] }
+        return calendarFrames(for: scope)
+    }
+
+    private func resolvedHandoffState(
+        for phase: DragOwnershipHandoffPhase
+    ) -> DragOwnershipHandoffState {
+        let claimSnapshot: DragTouchClaimSnapshot? = switch phase {
+        case .idle, .localPreview:
+            nil
+        case .rootClaimPending, .rootClaimAcquired, .landing, .restoring:
+            touchClaimHandoff.snapshot
+        }
+
+        let token = claimSnapshot?.token ?? handoffState.token
+        let owner: DragTouchClaimOwner = switch phase {
+        case .idle:
+            .none
+        case .localPreview, .rootClaimPending:
+            .localPreview
+        case .rootClaimAcquired:
+            .root
+        case .landing, .restoring:
+            if handoffState.isRootClaimAcquired || claimSnapshot?.rootClaimedAt != nil {
+                .root
+            } else if draggedItem != nil {
+                .localPreview
+            } else {
+                .none
+            }
+        }
+
+        let restoreReason = claimSnapshot?.restoreReason ?? handoffState.restoreReason
+        return DragOwnershipHandoffState(
+            phase: phase,
+            token: token,
+            owner: owner,
+            restoreReason: phase == .idle ? nil : restoreReason,
+            claimSnapshot: claimSnapshot
+        )
+    }
+
+    private func activateCalendarHoverIfNeeded() {
+        guard engine.snapshot.dragStarted,
+              let pointer = engine.snapshot.pointerGlobal else {
+            return
+        }
+
+        engine.updateScope(
+            engine.snapshot.currentScope,
+            visibleDayDate: visibleDayDate,
+            pointerGlobal: pointer,
+            timelineLayout: timelineLayout,
+            calendarFrames: hoverEnabledCalendarFrames(for: engine.snapshot.currentScope)
+        )
+        syncDisplayedOverlayFrame(animated: visibleScope != .day && snapshot.activeDate != nil)
+    }
+
+    private func updatePresentationAfterRootClaimSuccess() {
+        guard pendingLandingCommit == nil else { return }
+
+        if visibleScope == .day {
+            if overlayPresentation.visualPhase != .lifted && snapshot.dragStarted {
+                updatePresentation(to: .floating, animated: true)
+            }
+            return
+        }
+
+        updatePresentation(to: .holding, animated: true)
+        scheduleCalendarPillAdvance(for: visibleScope)
+    }
+
+    private func beginRestoreAfterFinishedClaimIfNeeded() {
+        guard touchClaimHandoff.snapshot.restoreReason != nil else { return }
+        beginRestoreAfterClaimFailure()
+    }
+
+    private func beginRestoreAfterClaimFailure() {
+        guard handoffState.phase == .rootClaimPending || handoffState.phase == .rootClaimAcquired else {
+            return
+        }
+
+        let snapshot = engine.cancel(timestampMs: nowTimestampMs())
+        handoffState = resolvedHandoffState(for: .restoring)
+        updatePresentation(to: .restoring, animated: true)
+        syncDisplayedOverlayFrame()
+
+        if snapshot.state == .restoring {
+            scheduleRestoreCleanup()
+        }
+    }
+
+    private func endCurrentHandoffSessionIfNeeded() {
+        guard let token = handoffState.token else { return }
+        _ = applyRootClaimEnd(for: token)
     }
 
     private func updatePresentation(
@@ -647,6 +871,14 @@ final class CalendarDragCoordinator {
     private func resolvedCalendarPillWidth(from sourceFrame: CGRect) -> CGFloat {
         let scaled = sourceFrame.width * 0.28
         return min(max(scaled, DragOverlayPresentationResolver.defaultPillWidth), 64)
+    }
+
+    private func nextClaimTimestamp() -> DragTouchClaimTimestamp {
+        claimFrameIndex += 1
+        return DragTouchClaimTimestamp(
+            frameIndex: claimFrameIndex,
+            uptimeMs: nowTimestampMs()
+        )
     }
 
     private func withoutAnimation(_ updates: () -> Void) {
