@@ -89,3 +89,16 @@ cross-day / cross-scope 이동은 여러 local fallback을 섞지 않고 단일 
 
 ## ADR-030: cross-scope 동안 타임블록은 하나의 session identity를 유지하고 presentation만 바꾼다
 cross-scope drag의 핵심은 블록이 사라졌다가 새로 생기는 것처럼 보이지 않는 것이다. 따라서 블록 identity는 drag session 전체에서 하나로 유지하고, 표현만 `timelineCard`와 `calendarPill` 사이에서 바꾼다. 실제 이동 객체는 항상 하나의 `single overlay`만 유지한다. month/year 날짜 강조도 하나의 `single active target`만 허용한다. `selectedDate`는 확정 전까지 유지하고, `activeDate`는 hover candidate로만 사용한다. 최종 확정은 `drop on touch up`만 허용하고, invalid drop은 계속 `restore-first policy`를 따른다. 성공 commit 시에만 편집 모드 종료다.
+
+## ADR-031: drag ownership handoff는 bounded `touch claim` 계약으로 고정한다
+이번 drag 고장의 핵심은 소유권 전환 순서가 느슨했다는 점이다. `source block -> placeholder` 전환이 root claim보다 먼저 일어나면 local preview와 root overlay가 동시에 owner처럼 보인다. local/global 좌표가 섞인 상태로 handoff를 진행하면 첫 프레임 점프와 잘못된 hit-test가 겹친다. `captureTouch(near:)`의 동기 성공을 drag 시작 조건으로 두면 root recognizer가 아직 touch를 관측하지 못한 첫 프레임에서 drag가 시작되지 않을 수 있다.
+
+결정:
+
+- `bounded handoff`는 local preview 즉시 lift → explicit `touch claim` 성공 → root ownership 전환 순서로만 진행한다.
+- claim pending 동안에는 source placeholder, root overlay, month/year `activeDate` hover를 켜지 않는다.
+- claim window는 `2 frame 이내의 매우 짧은 window`로 유지한다. 실패나 timeout이면 `restore-first policy`로 즉시 복구한다.
+- `selectedDate`는 commit 전까지 바꾸지 않는다. `activeDate`는 root ownership 이후 month/year hover candidate로만 사용한다.
+- stale claim success / stale end / stale cancel은 현재 token과 맞지 않으면 무시한다.
+- 최소 관측성 이벤트는 `drag_start`, `root_claim_success`, `root_claim_timeout`, `restore_reason`, `claim_latency_ms`다.
+- 이 관측성은 디버그와 회귀 재현용이다. hot path마다 무거운 로깅을 추가하는 목적이 아니다.

@@ -19,6 +19,8 @@
 - `single overlay`: 실제 이동 중 블록 overlay는 항상 하나만 유지한다
 - `single active target`: month/year에서 강조되는 날짜 target도 항상 하나만 유지한다
 - `restore-first policy`: invalid drop은 억지 확정 대신 원위치 복원을 우선한다
+- `bounded handoff`: drag 시작 직후 local preview가 먼저 lift되고, root owner 전환은 explicit `touch claim` 이후에만 일어난다
+- `touch claim`: root recognizer가 현재 touch를 현재 session token으로 명시적으로 인수했다는 신호다
 
 ## 레퍼런스 영상 관찰
 
@@ -72,18 +74,37 @@
 - `restoring` → `editModeReady`: cancel / invalid drop / restore에서는 편집 모드를 종료하지 않는다
 - `committed` → `idle`: 저장과 함께 편집 모드 종료
 
+## bounded handoff
+
+기존 실패 경로:
+
+- `source block -> placeholder` 전환이 root claim보다 먼저 일어나면 local preview와 root overlay가 동시에 owner처럼 보여 split-brain이 된다.
+- local/global 좌표가 섞인 상태로 root handoff를 진행하면 overlay 첫 프레임 점프와 잘못된 hit-test가 같이 발생한다.
+- `captureTouch(near:)`의 동기 성공을 drag 시작 조건으로 두면 root recognizer가 아직 touch를 관측하지 못한 첫 프레임에서 drag가 아예 시작되지 않을 수 있다.
+
+계약:
+
+- drag 시작 직후 source 내부의 local preview는 즉시 lift된다.
+- root ownership은 explicit `touch claim` 성공 후에만 전환된다.
+- claim pending 동안에는 source placeholder, root overlay, month/year `activeDate` hover를 켜지 않는다.
+- claim window는 `2 frame 이내의 매우 짧은 window`로 유지한다. 실패나 timeout이면 `restore-first policy`로 즉시 원위치 복구한다.
+- stale claim success, stale end, stale cancel은 현재 token과 맞지 않으면 무시한다.
+
 ## 역할 분리
 
 원본과 overlay 역할:
 
 - lift 전: 원본 블록이 실제 조작 대상처럼 보인다.
-- lift 후: 원본 블록은 placeholder/ghost로 남고, 실제 이동 표현은 `single overlay`만 담당한다.
+- lift 직후 claim pending 동안에는 source 내부 local preview만 활성 owner다.
+- root claim 성공 후: 원본 블록은 placeholder/ghost로 남고, 실제 이동 표현은 `single overlay`만 담당한다.
 - month/year에서는 `single active target`만 강조한다. 여러 날짜를 동시에 강조하지 않는다.
+- local preview와 root overlay가 동시에 활성 owner가 되면 안 된다.
 
 날짜 역할:
 
-- `selectedDate`는 확정 화면 기준이다. hover만으로 즉시 바뀌지 않는다.
-- `activeDate`는 month/year에서 hover candidate만 표현한다.
+- `selectedDate`는 확정 화면 기준이다. commit 전까지 바뀌지 않는다.
+- `activeDate`는 month/year에서만 의미가 있는 hover candidate다.
+- month/year hover 계산은 root ownership 이후에만 활성화된다.
 - day timeline에서는 `minuteCandidate`를 유지하고, month/year에서는 `activeDate`만 갱신한다.
 
 drop 규칙:
@@ -120,6 +141,17 @@ drop 규칙:
 ## 구현 가드레일
 
 - cross-scope 전체 경로를 여러 overlay로 나누지 않는다.
+- `bounded handoff`는 local preview → explicit `touch claim` → root `single overlay` 순서를 지킨다.
 - `single overlay`와 `single active target` 원칙을 유지한다.
 - day 복귀 전까지 `selectedDate`를 섣불리 바꾸지 않는다.
 - invalid drop은 `restore-first policy`를 유지한다.
+
+## 관측성
+
+- `drag_start`
+- `root_claim_success`
+- `root_claim_timeout`
+- `restore_reason`
+- `claim_latency_ms`
+
+이 관측성은 디버그와 회귀 재현을 위한 최소 기록이다. hot path마다 무거운 로깅을 추가하는 용도가 아니다.

@@ -26,10 +26,12 @@
  ⚙️ 탭 → F8 (설정)
 
  drag session 중:
+  `bounded handoff`로 day source의 local preview lift 이후 explicit `touch claim`이 성공해야만 root `single overlay`로 전환
   pinch scope transition으로 day/year scope 전환 가능
   `CalendarDragCoordinator` session을 유지한 채 scope만 교체
   lift 이후 overlay는 root scope 위에서 계속 유지되는 `single overlay`
   scope 전환 중에도 같은 블록을 계속 조작한다고 느껴야 함
+  month/year hover 계산은 root `touch claim` 성공 이후에만 활성화
   각 날짜 셀 hover → `activeDate`만 갱신, `selectedDate`는 즉시 바뀌지 않음
   날짜 강조는 항상 하나의 `single active target`만 유지
   날짜 셀 판정은 global coordinates 기준 hit-test
@@ -90,6 +92,14 @@
   블록 본체 y축 드래그 → 같은 날 이동 (15분 스냅, 자동 스크롤)
   블록 본체 이동은 단일 root drag path로만 처리
   drag 시작 직후 `liftPreparing` 단계에서 블록이 붙어 있는 요소에서 떠다니는 조작 대상으로 바뀜
+  `bounded handoff`: drag 시작 직후에는 source 내부 local preview만 즉시 lift된다
+  root ownership은 explicit `touch claim` 성공 후에만 root `single overlay`로 전환된다
+  claim pending 동안에는 source placeholder를 켜지 않고, month/year `activeDate` hover도 시작하지 않는다
+  `source block -> placeholder` 전환이 root claim보다 먼저 일어나면 안 된다
+  local/global 좌표가 섞인 상태로 root handoff를 진행하면 안 된다
+  `captureTouch(near:)`의 동기 성공을 drag 시작 조건으로 두지 않는다. root recognizer가 첫 프레임에 아직 touch를 못 본 상태면 drag가 아예 시작되지 않을 수 있다
+  claim window는 `2 frame 이내의 매우 짧은 window`로 제한하고, 실패나 timeout이면 `restore-first policy`로 즉시 복원한다
+  stale claim success / stale end / stale cancel은 현재 token과 맞지 않으면 무시한다
   drag session 중 pinch scope transition으로 day/month/year scope 전환 가능
   drag session 중 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 `single overlay`로 유지
   overlay owner는 DayView가 아니라 root `CalendarDragCoordinator`
@@ -180,6 +190,7 @@
  drag session 중:
   pinch scope transition으로 month scope 전환 가능
   `CalendarDragCoordinator` session을 유지한 채 scope만 교체
+  month/year hover 계산은 root `touch claim` 성공 이후에만 활성화
   pointer가 날짜 셀 위에서 안정적으로 머물면 `activeDate`만 갱신
   overlay는 root scope 위의 `single overlay`로 유지되고, scope 교체만으로는 종료되지 않음
   year scope에서는 익명 `calendarPill`과 `single active target`만 보임
