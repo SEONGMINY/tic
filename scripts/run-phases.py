@@ -39,6 +39,7 @@ RUNNER_CMD = [
 ]
 # Codex exec keeps reading from stdin until EOF, so phase prompts are piped via stdin.
 RUNNER_PROMPT_STDIN = True
+PHASE_TIMEOUT_SECONDS = int(os.environ.get("CODEX_PHASE_TIMEOUT_SECONDS", "1800"))
 
 
 # ---------------------------------------------------------------------------
@@ -305,30 +306,39 @@ def run_phase(task_dir: Path, phase: dict, preamble: str, gh_env: dict[str, str]
     else:
         cmd = [*RUNNER_CMD, full_prompt]
 
-    result = subprocess.run(
-        cmd,
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        input=full_prompt if RUNNER_PROMPT_STDIN else None,
-        timeout=600,  # 10 minutes per phase
-        env={**os.environ, **gh_env} if gh_env else None,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            input=full_prompt if RUNNER_PROMPT_STDIN else None,
+            timeout=PHASE_TIMEOUT_SECONDS,
+            env={**os.environ, **gh_env} if gh_env else None,
+        )
 
-    output_data = {
-        "phase": phase_num,
-        "name": phase_name,
-        "exitCode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-    }
+        output_data = {
+            "phase": phase_num,
+            "name": phase_name,
+            "exitCode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    except subprocess.TimeoutExpired as exc:
+        output_data = {
+            "phase": phase_num,
+            "name": phase_name,
+            "exitCode": 124,
+            "stdout": exc.stdout or "",
+            "stderr": (exc.stderr or "") + f"\nPhase timed out after {PHASE_TIMEOUT_SECONDS} seconds.",
+        }
 
     with open(output_file, "w") as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
 
-    if result.returncode != 0:
-        print(f"\n  WARN: {RUNNER_LABEL} exited with code {result.returncode}")
-        print(f"  stderr: {result.stderr[:500]}")
+    if output_data["exitCode"] != 0:
+        print(f"\n  WARN: {RUNNER_LABEL} exited with code {output_data['exitCode']}")
+        print(f"  stderr: {output_data['stderr'][:500]}")
 
     return output_data
 
