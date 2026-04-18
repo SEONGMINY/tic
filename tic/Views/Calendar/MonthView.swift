@@ -30,7 +30,6 @@ struct MonthView: View {
                                 month: month,
                                 viewModel: viewModel,
                                 eventKitService: eventKitService,
-                                dragCoordinator: dragCoordinator,
                                 columns: columns,
                                 weekdays: weekdays
                             )
@@ -102,7 +101,6 @@ private struct MonthSection: View {
     let month: Date
     let viewModel: CalendarViewModel
     let eventKitService: EventKitService
-    let dragCoordinator: CalendarDragCoordinator
     let columns: [GridItem]
     let weekdays: [String]
 
@@ -174,10 +172,6 @@ private struct MonthSection: View {
         let counts = eventCounts ?? [:]
         let count = min(counts[date.day] ?? 0, 3)
         let isWeekend = date.weekday == 1 || date.weekday == 7
-        let isActiveDropTarget =
-            dragCoordinator.snapshot.currentScope == .month &&
-            dragCoordinator.isSessionVisible &&
-            dragCoordinator.snapshot.activeDate?.isSameDay(as: date) == true
 
         return VStack(spacing: 4) {
             Text(verbatim: "\(date.day)")
@@ -201,14 +195,6 @@ private struct MonthSection: View {
             .frame(height: 5)
         }
         .frame(height: 40)
-        .background {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isActiveDropTarget ? Color.orange.opacity(0.12) : Color.clear)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(isActiveDropTarget ? Color.orange : Color.clear, lineWidth: 2)
-                }
-        }
         .reportCalendarDateFrame(date)
     }
 }

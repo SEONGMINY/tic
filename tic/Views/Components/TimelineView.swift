@@ -5,14 +5,6 @@ struct PhantomBlockInfo {
     let minute: Int
 }
 
-private struct TimelineViewportPreferenceKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
-
 private struct TimelineScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
@@ -33,6 +25,8 @@ struct TimelineView: View {
     var onCompleteItem: (TicItem) -> Void
     var onTimelineLayoutChange: (_ frameGlobal: CGRect, _ scrollOffsetY: CGFloat) -> Void
     var onBeginMoveDrag: (_ item: TicItem, _ sourceFrameGlobal: CGRect, _ startPointerGlobal: CGPoint, _ currentPointerGlobal: CGPoint) -> Void
+    var onMoveDragChanged: (_ pointerGlobal: CGPoint) -> Void
+    var onMoveDragEnded: (_ pointerGlobal: CGPoint) -> Void
 
     // Edit mode
     @Binding var editingItemId: String?
@@ -47,9 +41,17 @@ struct TimelineView: View {
     private let eventAreaLeadingInset: CGFloat = 8
     @State private var viewportFrameGlobal: CGRect = .zero
     @State private var scrollOffsetY: CGFloat = 0
+    @State private var didApplyInitialScrollPosition = false
+
+    private var eventTimeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }
 
     var body: some View {
         GeometryReader { viewportProxy in
+            let viewportFrame = viewportProxy.frame(in: .global)
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
                     ZStack(alignment: .topLeading) {
@@ -69,6 +71,7 @@ struct TimelineView: View {
                                 }
                             }
                         }
+                        .opacity(didApplyInitialScrollPosition ? 1 : 0)
                         .zIndex(1)
 
                         // 4. Phantom block
@@ -87,6 +90,7 @@ struct TimelineView: View {
                         // 5. Current time line (today only)
                         if selectedDate.isToday {
                             currentTimeLine
+                                .opacity(didApplyInitialScrollPosition ? 1 : 0)
                                 .zIndex(2)
                                 .id("nowLine")
                         }
@@ -172,14 +176,15 @@ struct TimelineView: View {
                                             )
                                         },
                                         onMoveGestureChanged: { pointerGlobal in
-                                            guard dragCoordinator.currentHandoffOwner == .localPreview else {
-                                                return
-                                            }
-                                            dragCoordinator.updateActiveDrag(pointerGlobal: pointerGlobal)
+                                            onMoveDragChanged(pointerGlobal)
+                                        },
+                                        onMoveGestureEnded: { pointerGlobal in
+                                            onMoveDragEnded(pointerGlobal)
                                         }
                                     )
                                 }
                             }
+                            .opacity(didApplyInitialScrollPosition ? 1 : 0)
                             .zIndex(3)
                         }
                     }
@@ -205,15 +210,13 @@ struct TimelineView: View {
                     }
                 }
                 .coordinateSpace(name: "timelineScroll")
-                .background {
-                    Color.clear.preference(
-                        key: TimelineViewportPreferenceKey.self,
-                        value: viewportProxy.frame(in: .global)
-                    )
+                .onAppear {
+                    viewportFrameGlobal = viewportFrame
+                    onTimelineLayoutChange(viewportFrame, scrollOffsetY)
                 }
-                .onPreferenceChange(TimelineViewportPreferenceKey.self) { value in
-                    viewportFrameGlobal = value
-                    onTimelineLayoutChange(value, scrollOffsetY)
+                .onChange(of: viewportFrame) { _, newValue in
+                    viewportFrameGlobal = newValue
+                    onTimelineLayoutChange(newValue, scrollOffsetY)
                 }
                 .onPreferenceChange(TimelineScrollOffsetPreferenceKey.self) { value in
                     scrollOffsetY = value
@@ -221,12 +224,13 @@ struct TimelineView: View {
                 }
                 .scrollDisabled(isEditingGestureActive || dragCoordinator.isSessionVisible)
                 .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        if selectedDate.isToday {
-                            let hour = Calendar.current.component(.hour, from: Date())
-                            withAnimation(.none) { proxy.scrollTo("hour_\(max(0, hour - 1))", anchor: .top) }
-                        } else {
-                            withAnimation(.none) { proxy.scrollTo("hour_8", anchor: .top) }
+                    didApplyInitialScrollPosition = false
+                    DispatchQueue.main.async {
+                        withAnimation(.none) {
+                            proxy.scrollTo(initialScrollAnchorId(for: selectedDate), anchor: .top)
+                        }
+                        DispatchQueue.main.async {
+                            didApplyInitialScrollPosition = true
                         }
                     }
                 }
@@ -336,12 +340,6 @@ struct TimelineView: View {
     // MARK: - Block Content
 
     private func blockContent(for item: TicItem, bgColor: Color, width: CGFloat, height: CGFloat) -> some View {
-        let timeFormatter: DateFormatter = {
-            let f = DateFormatter()
-            f.dateFormat = "HH:mm"
-            return f
-        }()
-
         return HStack(spacing: 3) {
             if item.isReminder {
                 Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
@@ -354,7 +352,7 @@ struct TimelineView: View {
                     .strikethrough(item.isCompleted)
                     .lineLimit(height < 30 ? 1 : 2)
                 if height >= 40, let start = item.startDate {
-                    Text(timeFormatter.string(from: start))
+                    Text(eventTimeFormatter.string(from: start))
                         .font(.system(size: 9))
                         .opacity(0.8)
                 }
@@ -367,6 +365,18 @@ struct TimelineView: View {
         .background(bgColor.opacity(item.isCompleted ? 0.4 : 0.85))
         .foregroundStyle(.white)
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("timeline-event-\(item.id)")
+        .accessibilityLabel(item.title)
+        .accessibilityValue(accessibilityValue(for: item))
+    }
+
+    private func accessibilityValue(for item: TicItem) -> String {
+        guard let start = item.startDate,
+              let end = item.endDate else {
+            return item.isAllDay ? "all-day" : "untimed"
+        }
+        return "\(eventTimeFormatter.string(from: start))-\(eventTimeFormatter.string(from: end))"
     }
 
     // MARK: - Current Time Line
@@ -408,5 +418,13 @@ struct TimelineView: View {
         guard let start, let end else { return hourHeight }
         let duration = end.timeIntervalSince(start) / 3600.0
         return max(CGFloat(duration) * hourHeight, 16)
+    }
+
+    private func initialScrollAnchorId(for date: Date) -> String {
+        if date.isToday {
+            let hour = Calendar.current.component(.hour, from: Date())
+            return "hour_\(max(0, hour - 1))"
+        }
+        return "hour_8"
     }
 }

@@ -1,12 +1,5 @@
 import SwiftUI
 
-private struct PendingEditingDates {
-    let itemId: String
-    let item: TicItem
-    let start: Date
-    let end: Date
-}
-
 struct DayView: View {
     var viewModel: CalendarViewModel
     var dayViewModel: DayViewModel
@@ -16,6 +9,8 @@ struct DayView: View {
     var dragCoordinator: CalendarDragCoordinator
     var onEditItem: (TicItem) -> Void
     var onBeginMoveDrag: (TicItem, CGRect, CGPoint, CGPoint) -> Void
+    var onMoveDragChanged: (CGPoint) -> Void
+    var onMoveDragEnded: (CGPoint) -> Void
 
     @State private var showActionSheet = false
     @State private var showDeleteAlert = false
@@ -33,42 +28,39 @@ struct DayView: View {
     @State private var editingItemId: String?
     @State private var showEditToolbar: Bool = true
     @State private var isEditingGestureActive: Bool = false
-    @State private var pendingEditingDates: PendingEditingDates?
 
     @Namespace private var dayAnimation
 
     private let weekdays = ["일", "월", "화", "수", "목", "금", "토"]
 
+    private var isSelectedDateLoaded: Bool {
+        dayViewModel.loadedDate?.isSameDay(as: viewModel.selectedDate) == true
+    }
+
+    private var displayedTimedItems: [TicItem] {
+        isSelectedDateLoaded ? dayViewModel.timedItems : []
+    }
+
+    private var displayedAllDayItems: [TicItem] {
+        isSelectedDateLoaded ? dayViewModel.allDayItems : []
+    }
+
+    private var displayedTimelessReminders: [TicItem] {
+        isSelectedDateLoaded ? dayViewModel.timelessReminders : []
+    }
+
+    private var displayedNextAction: TicItem? {
+        isSelectedDateLoaded ? dayViewModel.nextAction : nil
+    }
+
     private var showFAB: Bool {
-        !dayViewModel.timedItems.isEmpty ||
-        !dayViewModel.allDayItems.isEmpty ||
-        !dayViewModel.timelessReminders.isEmpty
+        !displayedTimedItems.isEmpty ||
+        !displayedAllDayItems.isEmpty ||
+        !displayedTimelessReminders.isEmpty
     }
 
     private var effectiveTimedItems: [TicItem] {
-        var items = dayViewModel.timedItems
-            .map { item in
-                guard let pendingEditingDates, pendingEditingDates.itemId == item.id else {
-                    return item
-                }
-                return item.updatingDates(
-                    startDate: pendingEditingDates.start,
-                    endDate: pendingEditingDates.end
-                )
-            }
-
-        if let pendingEditingDates,
-           items.contains(where: { $0.id == pendingEditingDates.itemId }) == false,
-           pendingEditingDates.start.isSameDay(as: viewModel.selectedDate) {
-            items.append(
-                pendingEditingDates.item.updatingDates(
-                    startDate: pendingEditingDates.start,
-                    endDate: pendingEditingDates.end
-                )
-            )
-        }
-
-        return items.sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+        dayViewModel.projectedTimedItems(for: viewModel.selectedDate)
     }
 
     private var timelineLayoutAttributes: [String: LayoutAttributes] {
@@ -81,7 +73,7 @@ struct DayView: View {
     @ViewBuilder
     private var timelineSection: some View {
         VStack(spacing: 0) {
-            if !dayViewModel.allDayItems.isEmpty {
+            if !displayedAllDayItems.isEmpty {
                 allDaySection
             }
 
@@ -102,6 +94,8 @@ struct DayView: View {
             onCompleteItem: handleComplete,
             onTimelineLayoutChange: handleTimelineLayoutChange,
             onBeginMoveDrag: onBeginMoveDrag,
+            onMoveDragChanged: onMoveDragChanged,
+            onMoveDragEnded: onMoveDragEnded,
             editingItemId: $editingItemId,
             showEditToolbar: $showEditToolbar,
             isEditingGestureActive: $isEditingGestureActive,
@@ -183,10 +177,10 @@ struct DayView: View {
         }
         .sheet(isPresented: $showActionSheet) {
             ActionListSheet(
-                nextAction: viewModel.selectedDate.isToday ? dayViewModel.nextAction : nil,
-                allDayItems: dayViewModel.allDayItems,
-                timedItems: dayViewModel.timedItems,
-                reminders: dayViewModel.timelessReminders,
+                nextAction: viewModel.selectedDate.isToday ? displayedNextAction : nil,
+                allDayItems: displayedAllDayItems,
+                timedItems: displayedTimedItems,
+                reminders: displayedTimelessReminders,
                 eventKitService: eventKitService,
                 onEdit: { item in
                     showActionSheet = false
@@ -249,16 +243,13 @@ struct DayView: View {
 
         do {
             try eventKitService.moveToDate(item, newStart: newStart, newEnd: newEnd)
-            withAnimation(.easeInOut(duration: 0.18)) {
-                pendingEditingDates = PendingEditingDates(
-                    itemId: itemId,
-                    item: item,
-                    start: newStart,
-                    end: newEnd
-                )
-            }
+            dayViewModel.registerPendingTimedItemMove(
+                item: item,
+                newStart: newStart,
+                newEnd: newEnd
+            )
         } catch {
-            pendingEditingDates = nil
+            dayViewModel.pendingTimedItemMove = nil
         }
     }
 
@@ -303,7 +294,7 @@ struct DayView: View {
     }
 
     private var totalItemCount: Int? {
-        let count = dayViewModel.timedItems.count + dayViewModel.allDayItems.count + dayViewModel.timelessReminders.count
+        let count = displayedTimedItems.count + displayedAllDayItems.count + displayedTimelessReminders.count
         return count > 0 ? count : nil
     }
 
@@ -384,7 +375,7 @@ struct DayView: View {
 
     private var allDaySection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(dayViewModel.allDayItems) { item in
+            ForEach(displayedAllDayItems) { item in
                 Button { onEditItem(item) } label: {
                     HStack(spacing: 6) {
                         Circle()
@@ -415,19 +406,6 @@ struct DayView: View {
 
     private func refreshDayItems() async {
         await dayViewModel.loadItems(for: viewModel.selectedDate, service: eventKitService)
-        resolvePendingEditingDates()
-    }
-
-    private func resolvePendingEditingDates() {
-        guard let pendingEditingDates else { return }
-        guard let updatedItem = dayViewModel.timedItems.first(where: { $0.id == pendingEditingDates.itemId }) else {
-            return
-        }
-
-        if updatedItem.startDate == pendingEditingDates.start &&
-            updatedItem.endDate == pendingEditingDates.end {
-            self.pendingEditingDates = nil
-        }
     }
 
     private func handleSessionTermination() {

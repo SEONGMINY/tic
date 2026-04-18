@@ -2,6 +2,19 @@ import Foundation
 import CoreGraphics
 
 enum DragSessionGeometry {
+    static func isFinite(_ value: CGFloat) -> Bool {
+        Double(value).isFinite
+    }
+
+    static func isUsableRect(_ rect: CGRect) -> Bool {
+        isFinite(rect.minX)
+            && isFinite(rect.minY)
+            && isFinite(rect.width)
+            && isFinite(rect.height)
+            && rect.width > 0
+            && rect.height > 0
+    }
+
     static func inset(_ rect: CGRect, by inset: CGFloat) -> CGRect {
         rect.insetBy(dx: inset, dy: inset)
     }
@@ -24,6 +37,27 @@ enum DragSessionGeometry {
         pointerGlobal.y - layout.frameGlobal.minY + layout.scrollOffsetY
     }
 
+    static func timelineDropProbePoint(
+        pointerGlobal: CGPoint,
+        overlayFrameGlobal: CGRect?,
+        dropZone: CGRect
+    ) -> CGPoint {
+        guard let overlayFrameGlobal,
+              isUsableRect(overlayFrameGlobal) else {
+            return pointerGlobal
+        }
+
+        let clampedX = min(
+            max(overlayFrameGlobal.midX, dropZone.minX + 1),
+            dropZone.maxX - 1
+        )
+
+        return CGPoint(
+            x: clampedX,
+            y: overlayFrameGlobal.minY
+        )
+    }
+
     static func rawMinute(localY: CGFloat, hourHeight: CGFloat) -> CGFloat {
         (localY / hourHeight) * 60
     }
@@ -38,15 +72,24 @@ enum DragSessionGeometry {
 
     static func minuteCandidate(
         pointerGlobal: CGPoint,
+        overlayFrameGlobal: CGRect? = nil,
         layout: DragTimelineLayout,
         snapStep: Int,
         dropInset: CGFloat
     ) -> Int? {
-        let dropZone = inset(layout.frameGlobal, by: dropInset)
-        guard pointInRect(pointerGlobal, rect: dropZone) else {
+        guard isUsableRect(layout.frameGlobal) else {
             return nil
         }
-        let localY = timelineLocalY(pointerGlobal: pointerGlobal, layout: layout)
+        let dropZone = inset(layout.frameGlobal, by: dropInset)
+        let probePoint = timelineDropProbePoint(
+            pointerGlobal: pointerGlobal,
+            overlayFrameGlobal: overlayFrameGlobal,
+            dropZone: dropZone
+        )
+        guard pointInRect(probePoint, rect: dropZone) else {
+            return nil
+        }
+        let localY = timelineLocalY(pointerGlobal: probePoint, layout: layout)
         let minute = rawMinute(localY: localY, hourHeight: layout.hourHeight)
         return snapMinute(clampMinute(minute), step: snapStep)
     }

@@ -26,6 +26,7 @@ struct EditableEventBlock: View {
     var onDuplicateItem: (_ itemId: String) -> Void
     var onMoveGestureBegan: ((_ sourceFrameGlobal: CGRect, _ startPointerGlobal: CGPoint, _ currentPointerGlobal: CGPoint) -> Void)?
     var onMoveGestureChanged: ((_ pointerGlobal: CGPoint) -> Void)?
+    var onMoveGestureEnded: ((_ pointerGlobal: CGPoint) -> Void)?
 
     @State private var activeDrag: DragType = .none
     @State private var dragOffset: CGFloat = 0
@@ -42,6 +43,18 @@ struct EditableEventBlock: View {
         f.dateFormat = "HH:mm"
         return f
     }()
+
+    private var accessibilityLabelText: String {
+        item.title
+    }
+
+    private var accessibilityValueText: String {
+        guard let start = item.startDate,
+              let end = item.endDate else {
+            return item.isAllDay ? "all-day" : "untimed"
+        }
+        return "\(timeFormatter.string(from: start))-\(timeFormatter.string(from: end))"
+    }
 
     // Snapped visual Y position
     private var visualY: CGFloat {
@@ -179,6 +192,10 @@ struct EditableEventBlock: View {
         .background(bgColor.opacity(item.isCompleted ? 0.4 : 0.85))
         .foregroundStyle(.white)
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("timeline-event-\(item.id)")
+        .accessibilityLabel(accessibilityLabelText)
+        .accessibilityValue(accessibilityValueText)
     }
 
     // MARK: - Handles
@@ -370,7 +387,10 @@ struct EditableEventBlock: View {
         }
 
         if dragType == .move, usesExternalMoveSession {
-            if externalMoveSessionStarted == false {
+            if externalMoveSessionStarted {
+                onMoveGestureChanged?(value.location)
+                onMoveGestureEnded?(value.location)
+            } else {
                 showEditToolbar = true
             }
             return

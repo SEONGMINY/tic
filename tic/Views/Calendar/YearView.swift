@@ -20,7 +20,6 @@ struct YearView: View {
                         ForEach(years, id: \.self) { year in
                             YearSection(
                                 year: year,
-                                dragCoordinator: dragCoordinator,
                                 onMonthTap: { monthNum in
                                     if let date = Calendar.current.date(from: DateComponents(year: year, month: monthNum, day: 1)) {
                                         withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
@@ -85,7 +84,6 @@ struct YearView: View {
 // 년도 섹션
 private struct YearSection: View {
     let year: Int
-    let dragCoordinator: CalendarDragCoordinator
     let onMonthTap: (Int) -> Void
 
     private static let currentMonth = Calendar.current.component(.month, from: .now)
@@ -107,8 +105,7 @@ private struct YearSection: View {
                     LightweightMiniMonth(
                         year: year,
                         month: monthNum,
-                        isCurrentMonth: isCurrentMonth,
-                        dragCoordinator: dragCoordinator
+                        isCurrentMonth: isCurrentMonth
                     )
                         .contentShape(Rectangle())
                         .onTapGesture { onMonthTap(monthNum) }
@@ -123,7 +120,6 @@ private struct LightweightMiniMonth: View {
     let year: Int
     let month: Int
     let isCurrentMonth: Bool
-    let dragCoordinator: CalendarDragCoordinator
 
     private static let cal = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 1), count: 7)
@@ -171,10 +167,6 @@ private struct LightweightMiniMonth: View {
 
     private func dayCell(_ date: Date) -> some View {
         let isToday = date.isToday
-        let isActiveDropTarget =
-            dragCoordinator.snapshot.currentScope == .year &&
-            dragCoordinator.isSessionVisible &&
-            dragCoordinator.snapshot.activeDate?.isSameDay(as: date) == true
 
         return Text(verbatim: "\(date.day)")
             .font(.system(size: 7, weight: isToday ? .bold : .light, design: .monospaced))
@@ -182,25 +174,8 @@ private struct LightweightMiniMonth: View {
             .frame(maxWidth: .infinity, minHeight: 12)
             .background {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(backgroundColor(isToday: isToday, isActiveDropTarget: isActiveDropTarget))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(isActiveDropTarget ? Color.orange : Color.clear, lineWidth: 1.5)
-                    }
+                    .fill(isToday ? .orange : .clear)
             }
             .reportCalendarDateFrame(date)
-    }
-
-    private func backgroundColor(
-        isToday: Bool,
-        isActiveDropTarget: Bool
-    ) -> Color {
-        if isToday {
-            return .orange
-        }
-        if isActiveDropTarget {
-            return .orange.opacity(0.12)
-        }
-        return .clear
     }
 }

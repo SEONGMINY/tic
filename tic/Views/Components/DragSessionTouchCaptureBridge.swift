@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 final class DragSessionTouchCaptureController {
-    fileprivate weak var recognizer: DragSessionTouchCaptureRecognizer?
+    fileprivate var recognizer: DragSessionTouchCaptureRecognizer?
     fileprivate var onTrackingAttached: ((DragTouchClaimToken) -> Void)?
     fileprivate var onMove: ((DragTouchClaimToken, CGPoint) -> Void)?
     fileprivate var onEnd: ((DragTouchClaimToken) -> Void)?
@@ -17,6 +17,29 @@ final class DragSessionTouchCaptureController {
 
     func releaseTracking() {
         recognizer?.releaseActiveTouch()
+    }
+
+    func installRecognizer(on hostView: UIView) {
+        let recognizer = recognizer ?? DragSessionTouchCaptureRecognizer()
+        recognizer.onTrackingAttached = { [weak self] token in
+            self?.onTrackingAttached?(token)
+        }
+        recognizer.onTrackedTouchMoved = { [weak self] token, point in
+            self?.onMove?(token, point)
+        }
+        recognizer.onTrackedTouchEnded = { [weak self] token in
+            self?.onEnd?(token)
+        }
+        recognizer.onTrackedTouchCancelled = { [weak self] token in
+            self?.onCancel?(token)
+        }
+
+        if recognizer.view !== hostView {
+            recognizer.view?.removeGestureRecognizer(recognizer)
+            hostView.addGestureRecognizer(recognizer)
+        }
+
+        self.recognizer = recognizer
     }
 }
 
@@ -60,27 +83,8 @@ final class DragSessionTouchCaptureInstallerView: UIView {
 
     func installRecognizerIfNeeded() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let hostView = self.superview else { return }
-            if self.controller?.recognizer?.view === hostView {
-                return
-            }
-
-            let recognizer = DragSessionTouchCaptureRecognizer()
-            recognizer.onTrackingAttached = { [weak controller = self.controller] token in
-                controller?.onTrackingAttached?(token)
-            }
-            recognizer.onTrackedTouchMoved = { [weak controller = self.controller] token, point in
-                controller?.onMove?(token, point)
-            }
-            recognizer.onTrackedTouchEnded = { [weak controller = self.controller] token in
-                controller?.onEnd?(token)
-            }
-            recognizer.onTrackedTouchCancelled = { [weak controller = self.controller] token in
-                controller?.onCancel?(token)
-            }
-
-            hostView.addGestureRecognizer(recognizer)
-            self.controller?.recognizer = recognizer
+            guard let self, let hostView = self.window else { return }
+            self.controller?.installRecognizer(on: hostView)
         }
     }
 }
@@ -103,7 +107,9 @@ final class DragSessionTouchCaptureRecognizer: UIGestureRecognizer, UIGestureRec
 
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
-        cancelsTouchesInView = true
+        // Root capture observes the touch, but day-local drag still owns the
+        // primary gesture lifecycle while the pointer stays in day scope.
+        cancelsTouchesInView = false
         delaysTouchesBegan = false
         delaysTouchesEnded = false
         delegate = self

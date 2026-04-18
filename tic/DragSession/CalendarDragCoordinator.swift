@@ -186,6 +186,30 @@ final class CalendarDragCoordinator {
         draggedItem
     }
 
+    var timelineFrameGlobal: CGRect? {
+        timelineLayout?.frameGlobal
+    }
+
+    var debugPointerGlobal: CGPoint? {
+        snapshot.pointerGlobal
+    }
+
+    var debugTimelineDropZoneGlobal: CGRect? {
+        guard let timelineLayout else { return nil }
+        return DragSessionGeometry.inset(
+            timelineLayout.frameGlobal,
+            by: engine.params.timelineDropInsetPt
+        )
+    }
+
+    var debugTimelinePointerInsideDropZone: Bool? {
+        guard let pointer = snapshot.pointerGlobal,
+              let dropZone = debugTimelineDropZoneGlobal else {
+            return nil
+        }
+        return DragSessionGeometry.pointInRect(pointer, rect: dropZone)
+    }
+
     var isGestureSessionActive: Bool {
         guard draggedItem != nil else { return false }
         guard pendingLandingCommit == nil else { return false }
@@ -210,6 +234,28 @@ final class CalendarDragCoordinator {
 
     var hasActiveSession: Bool {
         draggedItem != nil || snapshot.source != nil
+    }
+
+    func shouldTreatCapturedTouchCancellationAsDrop(
+        sceneIsActive: Bool
+    ) -> Bool {
+        sceneIsActive
+            && handoffState.isRootClaimAcquired
+            && snapshot.droppable
+    }
+
+    @discardableResult
+    func promotePendingTouchRelayToRootClaim(
+        for token: DragTouchClaimToken
+    ) -> Bool {
+        guard handoffState.token == token else { return false }
+        if handoffState.isRootClaimAcquired {
+            return true
+        }
+        guard hasPendingTouchRelay else { return false }
+
+        return applyRootClaimSuccess(for: token) == .applied
+            || handoffState.isRootClaimAcquired
     }
 
     func sourcePlaceholderOpacity(for itemId: String?) -> Double? {
@@ -335,6 +381,15 @@ final class CalendarDragCoordinator {
         scrollOffsetY: CGFloat,
         hourHeight: CGFloat = 60
     ) {
+        guard DragSessionGeometry.isUsableRect(frameGlobal) else {
+            DragDebugLog.log(
+                "updateTimelineLayout ignored invalid frame=\(frameGlobal.debugDescription) scroll=\(scrollOffsetY) hourHeight=\(hourHeight)"
+            )
+            return
+        }
+        DragDebugLog.log(
+            "updateTimelineLayout frame=\(frameGlobal.debugDescription) scroll=\(scrollOffsetY) hourHeight=\(hourHeight)"
+        )
         timelineLayout = DragTimelineLayout(
             frameGlobal: frameGlobal,
             scrollOffsetY: scrollOffsetY,
@@ -432,6 +487,7 @@ final class CalendarDragCoordinator {
             pendingTouchRelayToken = nil
             handoffState = resolvedHandoffState(for: .rootClaimPending)
             traceSink.record(.dragStart(token: token))
+            DragDebugLog.log("requestRootClaim token=\(token.rawValue)")
             return token
         case .rootClaimPending, .rootClaimAcquired, .landing, .restoring:
             return handoffState.token
@@ -536,6 +592,9 @@ final class CalendarDragCoordinator {
 
     func updateActiveDrag(pointerGlobal: CGPoint) {
         guard isGestureSessionActive else { return }
+        DragDebugLog.log(
+            "updateActiveDrag point=\(pointerGlobal.debugDescription) scope=\(String(describing: engine.snapshot.currentScope))"
+        )
 
         switch engine.snapshot.currentScope {
         case .day:
@@ -567,6 +626,7 @@ final class CalendarDragCoordinator {
             return
         }
         pendingTouchRelayToken = token
+        DragDebugLog.log("attachTouchTrackingRelay token=\(token.rawValue)")
     }
 
     func updateRelayedTouchMove(
@@ -604,6 +664,9 @@ final class CalendarDragCoordinator {
 
     func completeLocalDrag() -> DragSessionCommit? {
         guard shouldHandleDropLocally else { return nil }
+        DragDebugLog.log(
+            "completeLocalDrag minute=\(String(describing: snapshot.minuteCandidate)) date=\(String(describing: snapshot.dropCandidateDate))"
+        )
         return completeActiveDrag()
     }
 
@@ -615,6 +678,9 @@ final class CalendarDragCoordinator {
 
     func completeGlobalDrag() -> DragSessionCommit? {
         guard shouldHandleDragGlobally else { return nil }
+        DragDebugLog.log(
+            "completeGlobalDrag minute=\(String(describing: snapshot.minuteCandidate)) date=\(String(describing: snapshot.dropCandidateDate))"
+        )
         return completeActiveDrag()
     }
 
@@ -646,10 +712,14 @@ final class CalendarDragCoordinator {
     private func completeActiveDrag() -> DragSessionCommit? {
         guard let draggedItem else { return nil }
         if engine.snapshot.state == .pressing || engine.snapshot.state == .dragReady {
+            DragDebugLog.log("completeActiveDrag cancelled early state=\(String(describing: engine.snapshot.state))")
             cancelDrag()
             return nil
         }
         let snapshot = engine.drop(timestampMs: nowTimestampMs())
+        DragDebugLog.log(
+            "completeActiveDrag dropped final=\(String(describing: snapshot.finalDropResult)) invalid=\(String(describing: snapshot.invalidReason)) minute=\(String(describing: snapshot.minuteCandidate)) date=\(String(describing: snapshot.dropCandidateDate))"
+        )
         syncDisplayedOverlayFrame(animated: overlayPresentation.style == .calendarPill && snapshot.activeDate != nil)
 
         if let finalDropResult = snapshot.finalDropResult,
@@ -895,12 +965,11 @@ final class CalendarDragCoordinator {
 
     private func promotePendingTouchRelayIfNeeded(for scope: DragSessionScope) {
         guard scope != .day,
-              hasPendingTouchRelay,
               let token = handoffState.token else {
             return
         }
 
-        _ = applyRootClaimSuccess(for: token)
+        _ = promotePendingTouchRelayToRootClaim(for: token)
     }
 
     private func updatePresentationAfterRootClaimSuccess() {
@@ -927,6 +996,9 @@ final class CalendarDragCoordinator {
             return
         }
 
+        DragDebugLog.log(
+            "beginRestoreAfterClaimFailure phase=\(String(describing: handoffState.phase)) restoreReason=\(String(describing: touchClaimHandoff.snapshot.restoreReason))"
+        )
         let snapshot = engine.cancel(timestampMs: nowTimestampMs())
         handoffState = resolvedHandoffState(for: .restoring)
         updatePresentation(to: .restoring, animated: true)
@@ -1098,5 +1170,39 @@ final class CalendarDragCoordinator {
         case .year:
             return .year
         }
+    }
+}
+
+enum DragDayEdgeHoverDirection: Int, Equatable {
+    case previous = -1
+    case next = 1
+
+    var dayDelta: Int {
+        rawValue
+    }
+}
+
+enum DragDayEdgeHoverResolver {
+    static func direction(
+        pointerGlobal: CGPoint,
+        timelineFrameGlobal: CGRect,
+        edgeInset: CGFloat
+    ) -> DragDayEdgeHoverDirection? {
+        guard timelineFrameGlobal.isEmpty == false,
+              timelineFrameGlobal.contains(pointerGlobal) else {
+            return nil
+        }
+
+        let resolvedInset = min(max(edgeInset, 0), timelineFrameGlobal.width / 2)
+        let leftBoundary = timelineFrameGlobal.minX + resolvedInset
+        let rightBoundary = timelineFrameGlobal.maxX - resolvedInset
+
+        if pointerGlobal.x <= leftBoundary {
+            return .previous
+        }
+        if pointerGlobal.x >= rightBoundary {
+            return .next
+        }
+        return nil
     }
 }

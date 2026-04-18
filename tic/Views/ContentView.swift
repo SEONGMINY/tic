@@ -14,12 +14,18 @@ struct ContentView: View {
     @State private var dragCoordinator = CalendarDragCoordinator()
     @State private var rootTouchCapture = DragSessionTouchCaptureController()
     @State private var rootClaimTimeoutWorkItem: DispatchWorkItem?
+    @State private var dayEdgeHoverWorkItem: DispatchWorkItem?
+    @State private var dayEdgeHoverDirection: DragDayEdgeHoverDirection?
+    @State private var dayEdgeHoverToken: DragTouchClaimToken?
+    @State private var latestCapturedPointerGlobal: CGPoint?
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showEventForm = false
     @Environment(\.scenePhase) private var scenePhase
     private let liveActivityTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let rootClaimTimeoutSeconds = 2.0 / 60.0
+    private let dayEdgeHoverInset: CGFloat = 24
+    private let dayEdgeHoverDwellSeconds = 0.12
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,20 +62,21 @@ struct ContentView: View {
                     dragCoordinator.attachTouchTrackingRelay(for: token)
                 },
                 onMove: { token, point in
-                    dragCoordinator.updateRelayedTouchMove(for: token, pointerGlobal: point)
-                    if dragCoordinator.shouldPromoteRelayedTouchToRootClaim(for: token) {
-                        cancelRootClaimTimeout()
-                        _ = dragCoordinator.applyRootClaimSuccess(for: token)
-                    }
+                    handleDragMoveFromRootCapture(for: token, pointerGlobal: point)
                 },
                 onEnd: { token in
-                    handleCapturedDragEnded(for: token)
+                    handleCapturedDragTermination(
+                        for: token,
+                        termination: .ended,
+                        source: .root
+                    )
                 },
                 onCancel: { token in
-                    if dragCoordinator.currentHandoffToken == token {
-                        cancelRootClaimTimeout()
-                    }
-                    _ = dragCoordinator.applyRootClaimCancellation(for: token)
+                    handleCapturedDragTermination(
+                        for: token,
+                        termination: .cancelled,
+                        source: .root
+                    )
                 }
             )
         }
@@ -82,6 +89,18 @@ struct ContentView: View {
                     presentation: dragCoordinator.overlayPresentation
                 )
                     .zIndex(dragCoordinator.overlayPresentation.zIndex)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if DragDebugLog.isEnabled {
+                Text(dragDebugSummary)
+                    .font(.system(size: 10, design: .monospaced))
+                    .padding(8)
+                    .background(.black.opacity(0.72))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding(8)
+                    .accessibilityIdentifier("drag-debug-overlay")
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -119,6 +138,9 @@ struct ContentView: View {
         }
         .onChange(of: viewModel.scope) { _, newScope in
             dragCoordinator.updateVisibleScope(newScope)
+            if newScope != .day {
+                cancelDayEdgeHover()
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -126,12 +148,14 @@ struct ContentView: View {
                 Task { await checkLiveActivity() }
             } else if dragCoordinator.hasActiveSession {
                 cancelRootClaimTimeout()
+                cancelDayEdgeHover()
                 dragCoordinator.cancelDrag()
                 rootTouchCapture.releaseTracking()
             }
         }
         .onChange(of: dragCoordinator.sessionTerminationCount) { _, _ in
             cancelRootClaimTimeout()
+            cancelDayEdgeHover()
             rootTouchCapture.releaseTracking()
         }
         .onReceive(liveActivityTimer) { _ in
@@ -153,6 +177,57 @@ struct ContentView: View {
             Spacer()
             trailingNavItems
         }
+    }
+
+    private var dragDebugSummary: String {
+        let minute = dragCoordinator.snapshot.minuteCandidate.map(String.init) ?? "nil"
+        let date = dragCoordinator.snapshot.dropCandidateDate?.formatted(date: .abbreviated, time: .omitted) ?? "nil"
+        let termination = dragCoordinator.lastSessionTermination.map { String(describing: $0) } ?? "nil"
+        let pointer = dragCoordinator.debugPointerGlobal.map(debugPointString) ?? "nil"
+        let timelineFrame = dragCoordinator.timelineFrameGlobal.map(debugRectString) ?? "nil"
+        let dropZone = dragCoordinator.debugTimelineDropZoneGlobal.map(debugRectString) ?? "nil"
+        let insideDropZone = dragCoordinator.debugTimelinePointerInsideDropZone.map {
+            $0 ? "true" : "false"
+        } ?? "nil"
+        return [
+            "phase=\(dragCoordinator.handoffState.phase.rawValue)",
+            "owner=\(dragCoordinator.currentHandoffOwner.rawValue)",
+            "state=\(dragCoordinator.snapshot.state.rawValue)",
+            "scope=\(dragCoordinator.snapshot.currentScope.rawValue)",
+            "timeline=\(dragCoordinator.timelineFrameGlobal != nil)",
+            "frame=\(timelineFrame)",
+            "zone=\(dropZone)",
+            "pointer=\(pointer)",
+            "inside=\(insideDropZone)",
+            "minute=\(minute)",
+            "date=\(date)",
+            "active=\(dragCoordinator.hasActiveSession)",
+            "term=\(termination)"
+        ].joined(separator: "\n")
+    }
+
+    private func debugPointString(_ point: CGPoint) -> String {
+        "\(debugNumberString(point.x)),\(debugNumberString(point.y))"
+    }
+
+    private func debugRectString(_ rect: CGRect) -> String {
+        [
+            debugNumberString(rect.minX),
+            debugNumberString(rect.minY),
+            debugNumberString(rect.width),
+            debugNumberString(rect.height)
+        ].joined(separator: ",")
+    }
+
+    private func debugNumberString(_ value: CGFloat) -> String {
+        let doubleValue = Double(value)
+        guard doubleValue.isFinite else {
+            if doubleValue.isNaN {
+                return "nan"
+            }
+            return doubleValue.sign == .minus ? "-inf" : "inf"
+        }
+        return String(Int(doubleValue.rounded()))
     }
 
     @ViewBuilder
@@ -261,6 +336,12 @@ struct ContentView: View {
                         startPointerGlobal: startPointerGlobal,
                         currentPointerGlobal: currentPointerGlobal
                     )
+                },
+                onMoveDragChanged: { pointerGlobal in
+                    handleLocalDayDragChanged(pointerGlobal: pointerGlobal)
+                },
+                onMoveDragEnded: { pointerGlobal in
+                    handleLocalDayDragEnded(pointerGlobal: pointerGlobal)
                 }
             )
             .transition(.opacity.combined(with: .scale(scale: 1.02)))
@@ -338,14 +419,23 @@ struct ContentView: View {
         _ item: TicItem,
         commit: DragSessionCommit
     ) {
+        DragDebugLog.log(
+            "applyGlobalDragCommit item=\(item.id) start=\(commit.start) end=\(commit.end)"
+        )
         do {
             try eventKitService.moveToDate(item, newStart: commit.start, newEnd: commit.end)
+            dayViewModel.registerPendingTimedItemMove(
+                item: item,
+                newStart: commit.start,
+                newEnd: commit.end
+            )
             let nextState = CalendarScopeTransition.stateAfterGlobalDrop(commit: commit)
 
             withAnimation(.spring(duration: 0.35, bounce: 0.05)) {
                 viewModel.applyScopeTransitionState(nextState)
             }
         } catch {
+            dayViewModel.pendingTimedItemMove = nil
             eventKitService.lastChangeDate = Date()
         }
     }
@@ -357,31 +447,140 @@ struct ContentView: View {
         currentPointerGlobal: CGPoint
     ) {
         if dragCoordinator.hasActiveSession {
+            DragDebugLog.log("beginCapturedMoveDrag ignored existing session")
             return
         }
+
+        cancelDayEdgeHover()
 
         guard let token = dragCoordinator.beginDayDrag(
             item: item,
             sourceFrameGlobal: sourceFrameGlobal,
             pointerGlobal: startPointerGlobal
         ) else {
+            DragDebugLog.log("beginCapturedMoveDrag failed to acquire token")
             return
         }
+
+        DragDebugLog.log(
+            "beginCapturedMoveDrag token=\(token.rawValue) start=\(startPointerGlobal.debugDescription) current=\(currentPointerGlobal.debugDescription)"
+        )
 
         scheduleRootClaimTimeout(for: token)
         rootTouchCapture.requestClaim(for: token, near: currentPointerGlobal)
 
         if dragCoordinator.currentHandoffOwner == .localPreview {
             dragCoordinator.updateActiveDrag(pointerGlobal: currentPointerGlobal)
+            DragDebugLog.log(
+                "beginCapturedMoveDrag localPreview updated scope=\(String(describing: dragCoordinator.snapshot.currentScope)) minute=\(String(describing: dragCoordinator.snapshot.minuteCandidate))"
+            )
         }
     }
 
-    private func handleCapturedDragEnded(for token: DragTouchClaimToken) {
+    private func handleDragMoveFromRootCapture(
+        for token: DragTouchClaimToken,
+        pointerGlobal: CGPoint
+    ) {
+        latestCapturedPointerGlobal = pointerGlobal
+        DragDebugLog.log(
+            "handleDragMoveFromRootCapture token=\(token.rawValue) point=\(pointerGlobal.debugDescription) owner=\(dragCoordinator.currentHandoffOwner.rawValue) scope=\(String(describing: dragCoordinator.snapshot.currentScope))"
+        )
+        dragCoordinator.updateRelayedTouchMove(for: token, pointerGlobal: pointerGlobal)
+        if dragCoordinator.shouldPromoteRelayedTouchToRootClaim(for: token) {
+            cancelRootClaimTimeout()
+            _ = dragCoordinator.applyRootClaimSuccess(for: token)
+            DragDebugLog.log("handleDragMoveFromRootCapture promoted token=\(token.rawValue)")
+        }
+        updateDayEdgeHoverTracking(for: token, pointerGlobal: pointerGlobal)
+    }
+
+    private func handleLocalDayDragChanged(pointerGlobal: CGPoint) {
+        latestCapturedPointerGlobal = pointerGlobal
+        guard dragCoordinator.hasActiveSession,
+              dragCoordinator.currentHandoffOwner == .localPreview else {
+            DragDebugLog.log(
+                "handleLocalDayDragChanged ignored point=\(pointerGlobal.debugDescription) hasSession=\(dragCoordinator.hasActiveSession) owner=\(dragCoordinator.currentHandoffOwner.rawValue)"
+            )
+            return
+        }
+
+        dragCoordinator.updateActiveDrag(pointerGlobal: pointerGlobal)
+        DragDebugLog.log(
+            "handleLocalDayDragChanged point=\(pointerGlobal.debugDescription) minute=\(String(describing: dragCoordinator.snapshot.minuteCandidate)) date=\(String(describing: dragCoordinator.snapshot.dropCandidateDate)) state=\(String(describing: dragCoordinator.snapshot.state))"
+        )
+
+        if let token = dragCoordinator.currentHandoffToken {
+            updateDayEdgeHoverTracking(for: token, pointerGlobal: pointerGlobal)
+        }
+    }
+
+    private func handleLocalDayDragEnded(pointerGlobal: CGPoint) {
+        latestCapturedPointerGlobal = pointerGlobal
+        DragDebugLog.log(
+            "handleLocalDayDragEnded point=\(pointerGlobal.debugDescription) owner=\(dragCoordinator.currentHandoffOwner.rawValue) scope=\(String(describing: dragCoordinator.snapshot.currentScope))"
+        )
+        guard dragCoordinator.hasActiveSession,
+              DayDragTerminationPolicy.shouldAcceptLocalDayTermination(
+                hasActiveSession: dragCoordinator.hasActiveSession,
+                scope: dragCoordinator.snapshot.currentScope
+              ) else {
+            return
+        }
+
+        if dragCoordinator.isGestureSessionActive {
+            if dragCoordinator.shouldHandleDragGlobally {
+                dragCoordinator.updateGlobalDrag(pointerGlobal: pointerGlobal)
+            } else {
+                dragCoordinator.updateActiveDrag(pointerGlobal: pointerGlobal)
+            }
+        }
+
+        guard let token = dragCoordinator.currentHandoffToken else { return }
+        handleCapturedDragTermination(
+            for: token,
+            termination: .ended,
+            source: .local
+        )
+    }
+
+    private func handleCapturedDragTermination(
+        for token: DragTouchClaimToken,
+        termination: CapturedDragTermination,
+        source: DragTerminationSource
+    ) {
+        DragDebugLog.log(
+            "handleCapturedDragTermination token=\(token.rawValue) termination=\(String(describing: termination)) source=\(String(describing: source)) owner=\(dragCoordinator.currentHandoffOwner.rawValue) rootClaim=\(dragCoordinator.handoffState.isRootClaimAcquired) minute=\(String(describing: dragCoordinator.snapshot.minuteCandidate)) date=\(String(describing: dragCoordinator.snapshot.dropCandidateDate))"
+        )
         guard dragCoordinator.currentHandoffToken == token else { return }
+        guard DayDragTerminationPolicy.shouldHandleTermination(
+            source: source,
+            termination: termination,
+            scope: dragCoordinator.snapshot.currentScope
+            ,
+            isRootClaimAcquired: dragCoordinator.handoffState.isRootClaimAcquired
+        ) else {
+            return
+        }
+
         cancelRootClaimTimeout()
+        cancelDayEdgeHover()
 
         guard let item = dragCoordinator.sessionItem else {
             dragCoordinator.cancelDrag()
+            return
+        }
+
+        if termination == .cancelled {
+            guard dragCoordinator.shouldTreatCapturedTouchCancellationAsDrop(
+                sceneIsActive: scenePhase == .active
+            ) else {
+                DragDebugLog.log("handleCapturedDragTermination cancelling token=\(token.rawValue)")
+                _ = dragCoordinator.applyRootClaimCancellation(for: token)
+                return
+            }
+
+            guard let commit = dragCoordinator.completeGlobalDrag() else { return }
+            applyGlobalDragCommit(item, commit: commit)
             return
         }
 
@@ -391,12 +590,94 @@ struct ContentView: View {
         } else if dragCoordinator.shouldHandleDropLocally {
             commit = dragCoordinator.completeLocalDrag()
         } else {
-            dragCoordinator.cancelDrag()
+            DragDebugLog.log("handleCapturedDragTermination no local/global drop path token=\(token.rawValue)")
+            _ = dragCoordinator.applyRootClaimCancellation(for: token)
             return
         }
 
+        DragDebugLog.log("handleCapturedDragTermination commit=\(String(describing: commit))")
         guard let commit else { return }
         applyGlobalDragCommit(item, commit: commit)
+    }
+
+    private func updateDayEdgeHoverTracking(
+        for token: DragTouchClaimToken,
+        pointerGlobal: CGPoint
+    ) {
+        guard dragCoordinator.currentHandoffToken == token,
+              dragCoordinator.isGestureSessionActive,
+              dragCoordinator.snapshot.currentScope == .day,
+              let timelineFrame = dragCoordinator.timelineFrameGlobal,
+              let direction = DragDayEdgeHoverResolver.direction(
+                pointerGlobal: pointerGlobal,
+                timelineFrameGlobal: timelineFrame,
+                edgeInset: dayEdgeHoverInset
+              ) else {
+            cancelDayEdgeHover()
+            return
+        }
+
+        if dayEdgeHoverToken == token,
+           dayEdgeHoverDirection == direction,
+           dayEdgeHoverWorkItem != nil {
+            return
+        }
+
+        scheduleDayEdgeHover(for: token, direction: direction)
+    }
+
+    private func scheduleDayEdgeHover(
+        for token: DragTouchClaimToken,
+        direction: DragDayEdgeHoverDirection
+    ) {
+        cancelDayEdgeHover()
+        dayEdgeHoverToken = token
+        dayEdgeHoverDirection = direction
+
+        let workItem = DispatchWorkItem { [token, direction] in
+            dayEdgeHoverWorkItem = nil
+            guard dragCoordinator.currentHandoffToken == token,
+                  dragCoordinator.isGestureSessionActive,
+                  dragCoordinator.snapshot.currentScope == .day,
+                  scenePhase == .active else {
+                cancelDayEdgeHover()
+                return
+            }
+
+            guard dragCoordinator.promotePendingTouchRelayToRootClaim(for: token) else {
+                cancelDayEdgeHover()
+                return
+            }
+
+            let nextDate = viewModel.selectedDate.adding(days: direction.dayDelta)
+            guard nextDate.isSameDay(as: viewModel.selectedDate) == false else {
+                cancelDayEdgeHover()
+                return
+            }
+
+            withAnimation(.easeInOut(duration: 0.22)) {
+                viewModel.selectedDate = nextDate
+            }
+            dragCoordinator.updateVisibleDay(nextDate)
+
+            if let latestCapturedPointerGlobal {
+                dragCoordinator.updateGlobalDrag(pointerGlobal: latestCapturedPointerGlobal)
+                updateDayEdgeHoverTracking(for: token, pointerGlobal: latestCapturedPointerGlobal)
+            }
+        }
+
+        dayEdgeHoverWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + dayEdgeHoverDwellSeconds,
+            execute: workItem
+        )
+    }
+
+    private func cancelDayEdgeHover() {
+        dayEdgeHoverWorkItem?.cancel()
+        dayEdgeHoverWorkItem = nil
+        dayEdgeHoverDirection = nil
+        dayEdgeHoverToken = nil
     }
 
     private func scheduleRootClaimTimeout(for token: DragTouchClaimToken) {
@@ -405,6 +686,7 @@ struct ContentView: View {
         let workItem = DispatchWorkItem { [token] in
             guard dragCoordinator.currentHandoffToken == token else { return }
             let result = dragCoordinator.expirePendingRootClaimIfNeeded()
+            DragDebugLog.log("rootClaimTimeout token=\(token.rawValue) result=\(String(describing: result))")
             if result == .applied {
                 rootTouchCapture.releaseTracking()
             }
@@ -420,5 +702,39 @@ struct ContentView: View {
     private func cancelRootClaimTimeout() {
         rootClaimTimeoutWorkItem?.cancel()
         rootClaimTimeoutWorkItem = nil
+    }
+}
+
+enum CapturedDragTermination {
+    case ended
+    case cancelled
+}
+
+enum DragTerminationSource {
+    case local
+    case root
+}
+
+enum DayDragTerminationPolicy {
+    static func shouldAcceptLocalDayTermination(
+        hasActiveSession: Bool,
+        scope: DragSessionScope
+    ) -> Bool {
+        hasActiveSession && scope == .day
+    }
+
+    static func shouldHandleTermination(
+        source: DragTerminationSource,
+        termination: CapturedDragTermination,
+        scope: DragSessionScope,
+        isRootClaimAcquired: Bool
+    ) -> Bool {
+        if source == .root &&
+            termination == .cancelled &&
+            scope == .day &&
+            isRootClaimAcquired == false {
+            return false
+        }
+        return true
     }
 }

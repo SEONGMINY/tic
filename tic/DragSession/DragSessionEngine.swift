@@ -189,16 +189,32 @@ struct DragSessionEngine {
 
     private mutating func updateTimelineCandidates(with point: CGPoint, layout: DragTimelineLayout?) {
         guard let layout else {
+            DragDebugLog.log(
+                "updateTimelineCandidates layout=nil point=\(point.debugDescription)"
+            )
             snapshot.minuteCandidate = nil
             return
         }
         snapshot.currentScope = .day
         snapshot.dateCandidate = snapshot.dateCandidate ?? snapshot.source?.sourceDate
+        let dropZone = DragSessionGeometry.inset(
+            layout.frameGlobal,
+            by: params.timelineDropInsetPt
+        )
+        let probePoint = DragSessionGeometry.timelineDropProbePoint(
+            pointerGlobal: point,
+            overlayFrameGlobal: snapshot.overlayFrameGlobal,
+            dropZone: dropZone
+        )
         snapshot.minuteCandidate = DragSessionGeometry.minuteCandidate(
             pointerGlobal: point,
+            overlayFrameGlobal: snapshot.overlayFrameGlobal,
             layout: layout,
             snapStep: params.minuteSnapStep,
             dropInset: params.timelineDropInsetPt
+        )
+        DragDebugLog.log(
+            "updateTimelineCandidates point=\(point.debugDescription) probe=\(probePoint.debugDescription) frame=\(layout.frameGlobal.debugDescription) zone=\(dropZone.debugDescription) minute=\(String(describing: snapshot.minuteCandidate))"
         )
     }
 

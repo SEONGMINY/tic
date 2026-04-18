@@ -52,9 +52,6 @@ struct DragSessionOverlayBlock: View {
         )
         .offset(x: frame.minX, y: frame.minY)
         .allowsHitTesting(false)
-        .transaction { transaction in
-            transaction.animation = nil
-        }
     }
 
     @ViewBuilder

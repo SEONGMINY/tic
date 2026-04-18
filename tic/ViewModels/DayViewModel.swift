@@ -7,6 +7,24 @@ struct LayoutAttributes {
     let totalColumns: Int
 }
 
+struct PendingTimedItemMove {
+    let itemId: String
+    let item: TicItem
+    let start: Date
+    let end: Date
+
+    var targetDate: Date {
+        start.startOfDay
+    }
+
+    func updatedItem() -> TicItem {
+        item.updatingDates(
+            startDate: start,
+            endDate: end
+        )
+    }
+}
+
 @Observable
 class DayViewModel {
     var items: [TicItem] = []
@@ -14,9 +32,23 @@ class DayViewModel {
     var allDayItems: [TicItem] = []
     var timelessReminders: [TicItem] = []
     var nextAction: TicItem?
+    var loadedDate: Date?
+    var pendingTimedItemMove: PendingTimedItemMove?
+
+    private var requestedDate: Date?
 
     func loadItems(for date: Date, service: EventKitService) async {
-        let all = await service.fetchAllItems(for: date)
+        let targetDate = date.startOfDay
+        requestedDate = targetDate
+        if loadedDate?.isSameDay(as: targetDate) != true {
+            loadedDate = nil
+        }
+
+        let all = await service.fetchAllItems(for: targetDate)
+        guard requestedDate?.isSameDay(as: targetDate) == true else {
+            return
+        }
+
         items = all
 
         timedItems = all.filter { item in
@@ -24,8 +56,36 @@ class DayViewModel {
         }
         allDayItems = all.filter { $0.isAllDay }
         timelessReminders = all.filter { $0.isReminder && !$0.hasTime }
+        loadedDate = targetDate
 
-        computeNextAction(for: date)
+        resolvePendingTimedItemMove()
+        computeNextAction(for: targetDate)
+    }
+
+    func registerPendingTimedItemMove(
+        item: TicItem,
+        newStart: Date,
+        newEnd: Date
+    ) {
+        pendingTimedItemMove = PendingTimedItemMove(
+            itemId: item.id,
+            item: item,
+            start: newStart,
+            end: newEnd
+        )
+    }
+
+    func projectedTimedItems(for visibleDate: Date) -> [TicItem] {
+        var projected = timedItems.filter { item in
+            item.id != pendingTimedItemMove?.itemId
+        }
+
+        if let pendingTimedItemMove,
+           visibleDate.isSameDay(as: pendingTimedItemMove.targetDate) {
+            projected.append(pendingTimedItemMove.updatedItem())
+        }
+
+        return projected.sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }
 
     func computeNextAction(for date: Date) {
@@ -123,5 +183,21 @@ class DayViewModel {
         }
 
         return result
+    }
+
+    private func resolvePendingTimedItemMove() {
+        guard let pendingTimedItemMove else { return }
+        guard loadedDate?.isSameDay(as: pendingTimedItemMove.targetDate) == true else {
+            return
+        }
+
+        guard let updatedItem = timedItems.first(where: { $0.id == pendingTimedItemMove.itemId }) else {
+            return
+        }
+
+        if updatedItem.startDate == pendingTimedItemMove.start &&
+            updatedItem.endDate == pendingTimedItemMove.end {
+            self.pendingTimedItemMove = nil
+        }
     }
 }
