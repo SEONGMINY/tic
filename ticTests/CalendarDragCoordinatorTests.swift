@@ -117,6 +117,30 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(commit?.end, movedEndDate)
     }
 
+    func testAttachedRelayKeepsSameDayDropLocalUntilScopeLeavesDay() {
+        let coordinator = makeCoordinator()
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        let token = currentToken(for: coordinator)
+
+        coordinator.attachTouchTrackingRelay(for: token)
+
+        XCTAssertEqual(coordinator.currentHandoffOwner, .localPreview)
+        XCTAssertFalse(coordinator.shouldHandleDragGlobally)
+        XCTAssertTrue(coordinator.shouldHandleDropLocally)
+        XCTAssertTrue(coordinator.hasPendingTouchRelay)
+        XCTAssertFalse(coordinator.shouldPromoteRelayedTouchToRootClaim(for: token))
+
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+
+        let commit = coordinator.completeLocalDrag()
+
+        XCTAssertEqual(commit?.itemId, item.id)
+        XCTAssertEqual(commit?.start, movedStartDate)
+        XCTAssertEqual(commit?.end, movedEndDate)
+    }
+
     func testReturningToDayAfterRootOwnershipDoesNotCommitLocally() {
         let coordinator = makeCoordinator()
         let item = makeItem()
@@ -345,6 +369,7 @@ final class CalendarDragCoordinatorTests: XCTestCase {
 
         coordinator.attachTouchTrackingRelay(for: token)
         coordinator.updateVisibleScope(.month)
+
         waitForCleanup()
 
         XCTAssertEqual(coordinator.handoffState.phase, .rootClaimAcquired)
@@ -352,7 +377,9 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.shouldHandleDragGlobally)
         XCTAssertTrue(coordinator.handoffState.allowsCalendarHover)
         XCTAssertNil(coordinator.snapshot.activeDate)
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
         XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
+        XCTAssertTrue(coordinator.isRootOverlayVisible)
     }
 
     func testClaimTimeoutRestoresSessionThroughRestorePath() {
@@ -679,6 +706,337 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.rootOverlayFrameLocal, firstFrame)
     }
 
+    func testCapturedCancellationInCalendarScopeCanStillCommitGlobalDrop() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let dropPoint = CGPoint(x: 260, y: 100)
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        claimSuccess(coordinator)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
+        coordinator.updateVisibleScope(.month)
+        coordinator.updateGlobalDrag(pointerGlobal: dropPoint)
+
+        XCTAssertTrue(coordinator.snapshot.droppable)
+        XCTAssertTrue(coordinator.shouldTreatCapturedTouchCancellationAsDrop(sceneIsActive: true))
+        XCTAssertFalse(coordinator.shouldTreatCapturedTouchCancellationAsDrop(sceneIsActive: false))
+    }
+
+    func testCapturedCancellationInRootOwnedDayScopeCanStillCommitDrop() {
+        let coordinator = makeCoordinator()
+
+        beginDrag(coordinator, item: makeItem())
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        claimSuccess(coordinator)
+
+        XCTAssertEqual(coordinator.snapshot.currentScope, .day)
+        XCTAssertTrue(coordinator.shouldTreatCapturedTouchCancellationAsDrop(sceneIsActive: true))
+    }
+
+    func testCapturedCancellationInLocalDayScopeNeverBecomesGlobalDrop() {
+        let coordinator = makeCoordinator()
+
+        beginDrag(coordinator, item: makeItem())
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+
+        XCTAssertEqual(coordinator.snapshot.currentScope, .day)
+        XCTAssertFalse(coordinator.shouldTreatCapturedTouchCancellationAsDrop(sceneIsActive: true))
+    }
+
+    func testDayEdgeHoverResolverDetectsOnlyTimelineEdgeBands() {
+        let frame = CGRect(x: 52, y: 120, width: 280, height: 1440)
+
+        XCTAssertEqual(
+            DragDayEdgeHoverResolver.direction(
+                pointerGlobal: CGPoint(x: 60, y: 240),
+                timelineFrameGlobal: frame,
+                edgeInset: 24
+            ),
+            .previous
+        )
+        XCTAssertEqual(
+            DragDayEdgeHoverResolver.direction(
+                pointerGlobal: CGPoint(x: 324, y: 240),
+                timelineFrameGlobal: frame,
+                edgeInset: 24
+            ),
+            .next
+        )
+        XCTAssertNil(
+            DragDayEdgeHoverResolver.direction(
+                pointerGlobal: CGPoint(x: 180, y: 240),
+                timelineFrameGlobal: frame,
+                edgeInset: 24
+            )
+        )
+        XCTAssertNil(
+            DragDayEdgeHoverResolver.direction(
+                pointerGlobal: CGPoint(x: 60, y: 80),
+                timelineFrameGlobal: frame,
+                edgeInset: 24
+            )
+        )
+    }
+
+    func testDayViewModelIgnoresStaleLoadResults() async {
+        let service = StubEventKitService()
+        let viewModel = DayViewModel()
+        let firstDate = selectedDate.startOfDay
+        let secondDate = selectedDate.adding(days: 1).startOfDay
+        let firstItem = makeItem()
+        let secondItem = makeItem(
+            id: "event-2",
+            startDate: Calendar.current.date(
+                from: DateComponents(year: secondDate.year, month: secondDate.month, day: secondDate.day, hour: 9)
+            )!,
+            endDate: Calendar.current.date(
+                from: DateComponents(year: secondDate.year, month: secondDate.month, day: secondDate.day, hour: 10)
+            )!
+        )
+
+        service.stubbedItems[firstDate] = [firstItem]
+        service.stubbedItems[secondDate] = [secondItem]
+        service.stubbedDelayNs[firstDate] = 80_000_000
+        service.stubbedDelayNs[secondDate] = 10_000_000
+
+        async let firstLoad: Void = viewModel.loadItems(for: firstDate, service: service)
+        try? await Task.sleep(nanoseconds: 5_000_000)
+        async let secondLoad: Void = viewModel.loadItems(for: secondDate, service: service)
+
+        _ = await (firstLoad, secondLoad)
+
+        XCTAssertEqual(viewModel.loadedDate, secondDate)
+        XCTAssertEqual(viewModel.items.map(\.id), [secondItem.id])
+        XCTAssertEqual(viewModel.timedItems.map(\.id), [secondItem.id])
+    }
+
+    func testProjectedTimedItemsReplaceOriginalSlotForSameDayPendingMove() {
+        let viewModel = DayViewModel()
+        let item = makeItem()
+        let movedStart = Calendar.current.date(
+            from: DateComponents(year: 2026, month: 4, day: 16, hour: 11)
+        )!
+        let movedEnd = Calendar.current.date(
+            from: DateComponents(year: 2026, month: 4, day: 16, hour: 12)
+        )!
+
+        viewModel.timedItems = [item]
+        viewModel.registerPendingTimedItemMove(
+            item: item,
+            newStart: movedStart,
+            newEnd: movedEnd
+        )
+
+        let projected = viewModel.projectedTimedItems(for: selectedDate)
+
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected.first?.id, item.id)
+        XCTAssertEqual(projected.first?.startDate, movedStart)
+        XCTAssertEqual(projected.first?.endDate, movedEnd)
+    }
+
+    func testProjectedTimedItemsMoveAcrossDatesBeforeReload() {
+        let viewModel = DayViewModel()
+        let item = makeItem()
+        let targetDate = Calendar.current.date(
+            from: DateComponents(year: 2026, month: 4, day: 17, hour: 11)
+        )!
+        let targetEnd = Calendar.current.date(
+            from: DateComponents(year: 2026, month: 4, day: 17, hour: 12)
+        )!
+
+        viewModel.timedItems = [item]
+        viewModel.registerPendingTimedItemMove(
+            item: item,
+            newStart: targetDate,
+            newEnd: targetEnd
+        )
+
+        XCTAssertTrue(viewModel.projectedTimedItems(for: selectedDate).isEmpty)
+
+        let projectedTarget = viewModel.projectedTimedItems(for: targetDate)
+        XCTAssertEqual(projectedTarget.count, 1)
+        XCTAssertEqual(projectedTarget.first?.id, item.id)
+        XCTAssertEqual(projectedTarget.first?.startDate, targetDate)
+        XCTAssertEqual(projectedTarget.first?.endDate, targetEnd)
+    }
+
+    func testLoadingTargetDayClearsPendingTimedItemMoveWhenStoreCatchesUp() async {
+        let service = StubEventKitService()
+        let viewModel = DayViewModel()
+        let item = makeItem()
+        let targetDate = Calendar.current.date(
+            from: DateComponents(year: 2026, month: 4, day: 17, hour: 11)
+        )!
+        let targetEnd = Calendar.current.date(
+            from: DateComponents(year: 2026, month: 4, day: 17, hour: 12)
+        )!
+        let movedItem = makeItem(
+            id: item.id,
+            startDate: targetDate,
+            endDate: targetEnd
+        )
+
+        viewModel.registerPendingTimedItemMove(
+            item: item,
+            newStart: targetDate,
+            newEnd: targetEnd
+        )
+        service.stubbedItems[targetDate.startOfDay] = [movedItem]
+
+        await viewModel.loadItems(for: targetDate, service: service)
+
+        XCTAssertNil(viewModel.pendingTimedItemMove)
+        XCTAssertEqual(viewModel.timedItems.map(\.id), [movedItem.id])
+    }
+
+    func testDayEdgeHoverResolverPerformance() {
+        let frame = CGRect(x: 52, y: 120, width: 280, height: 1440)
+        let points = [
+            CGPoint(x: 60, y: 180),
+            CGPoint(x: 178, y: 240),
+            CGPoint(x: 324, y: 360),
+            CGPoint(x: 178, y: 520)
+        ]
+
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()]) {
+            var hitCount = 0
+            for index in 0..<200_000 {
+                let point = points[index % points.count]
+                if DragDayEdgeHoverResolver.direction(
+                    pointerGlobal: point,
+                    timelineFrameGlobal: frame,
+                    edgeInset: 24
+                ) != nil {
+                    hitCount += 1
+                }
+            }
+            XCTAssertGreaterThan(hitCount, 0)
+        }
+    }
+
+    func testLocalDayTerminationPolicyAcceptsOnlyActiveDaySessions() {
+        XCTAssertTrue(
+            DayDragTerminationPolicy.shouldAcceptLocalDayTermination(
+                hasActiveSession: true,
+                scope: .day
+            )
+        )
+        XCTAssertFalse(
+            DayDragTerminationPolicy.shouldAcceptLocalDayTermination(
+                hasActiveSession: false,
+                scope: .day
+            )
+        )
+        XCTAssertFalse(
+            DayDragTerminationPolicy.shouldAcceptLocalDayTermination(
+                hasActiveSession: true,
+                scope: .month
+            )
+        )
+    }
+
+    func testRootCancelledTerminationIsIgnoredOnlyInDayScope() {
+        XCTAssertFalse(
+            DayDragTerminationPolicy.shouldHandleTermination(
+                source: .root,
+                termination: .cancelled,
+                scope: .day,
+                isRootClaimAcquired: false
+            )
+        )
+        XCTAssertTrue(
+            DayDragTerminationPolicy.shouldHandleTermination(
+                source: .root,
+                termination: .ended,
+                scope: .day,
+                isRootClaimAcquired: false
+            )
+        )
+        XCTAssertTrue(
+            DayDragTerminationPolicy.shouldHandleTermination(
+                source: .root,
+                termination: .cancelled,
+                scope: .month,
+                isRootClaimAcquired: false
+            )
+        )
+        XCTAssertTrue(
+            DayDragTerminationPolicy.shouldHandleTermination(
+                source: .root,
+                termination: .cancelled,
+                scope: .day,
+                isRootClaimAcquired: true
+            )
+        )
+        XCTAssertTrue(
+            DayDragTerminationPolicy.shouldHandleTermination(
+                source: .local,
+                termination: .cancelled,
+                scope: .day,
+                isRootClaimAcquired: false
+            )
+        )
+    }
+
+    func testTouchCaptureInstallerAttachesRecognizerToWindowSurface() {
+        let controller = DragSessionTouchCaptureController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let hostView = UIView(frame: window.bounds)
+        let installerView = DragSessionTouchCaptureInstallerView(frame: hostView.bounds)
+        installerView.controller = controller
+
+        hostView.addSubview(installerView)
+        window.addSubview(hostView)
+        installerView.installRecognizerIfNeeded()
+        drainMainQueue()
+
+        let installedRecognizer = window.gestureRecognizers?.first {
+            $0 is DragSessionTouchCaptureRecognizer
+        }
+
+        XCTAssertNotNil(installedRecognizer)
+        XCTAssertFalse(hostView.gestureRecognizers?.contains(where: { $0 === installedRecognizer }) ?? false)
+    }
+
+    func testTouchCaptureControllerReusesSameRecognizerAcrossHostChanges() {
+        let controller = DragSessionTouchCaptureController()
+        let firstWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let secondWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+
+        controller.installRecognizer(on: firstWindow)
+        let initialRecognizer = firstWindow.gestureRecognizers?.first {
+            $0 is DragSessionTouchCaptureRecognizer
+        }
+
+        controller.installRecognizer(on: secondWindow)
+        let movedRecognizer = secondWindow.gestureRecognizers?.first {
+            $0 is DragSessionTouchCaptureRecognizer
+        }
+
+        XCTAssertNotNil(initialRecognizer)
+        XCTAssertTrue(initialRecognizer === movedRecognizer)
+        XCTAssertFalse(firstWindow.gestureRecognizers?.contains(where: { $0 === initialRecognizer }) ?? false)
+    }
+
+    func testTouchCaptureRecognizerDoesNotCancelSourceTouches() {
+        let recognizer = DragSessionTouchCaptureRecognizer()
+
+        XCTAssertFalse(recognizer.cancelsTouchesInView)
+    }
+
     private var selectedDate: Date {
         Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 16))!
     }
@@ -783,6 +1141,14 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         wait(for: [expectation], timeout: max(seconds * 4, 0.2))
     }
 
+    private func drainMainQueue() {
+        let expectation = expectation(description: "drain main queue")
+        DispatchQueue.main.async {
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
     private func expectedStartDate(
         on date: Date,
         hour: Int,
@@ -800,15 +1166,24 @@ final class CalendarDragCoordinatorTests: XCTestCase {
     }
 
     private func makeItem() -> TicItem {
-        let startDate = Calendar.current.date(
-            from: DateComponents(year: 2026, month: 4, day: 16, hour: 2, minute: 0)
-        )!
-        let endDate = Calendar.current.date(
-            from: DateComponents(year: 2026, month: 4, day: 16, hour: 3, minute: 0)
-        )!
-
-        return TicItem(
+        makeItem(
             id: "event-1",
+            startDate: Calendar.current.date(
+                from: DateComponents(year: 2026, month: 4, day: 16, hour: 2, minute: 0)
+            )!,
+            endDate: Calendar.current.date(
+                from: DateComponents(year: 2026, month: 4, day: 16, hour: 3, minute: 0)
+            )!
+        )
+    }
+
+    private func makeItem(
+        id: String,
+        startDate: Date,
+        endDate: Date
+    ) -> TicItem {
+        return TicItem(
+            id: id,
             title: "Drag session",
             notes: nil,
             startDate: startDate,
@@ -823,5 +1198,18 @@ final class CalendarDragCoordinatorTests: XCTestCase {
             ekEvent: nil,
             ekReminder: nil
         )
+    }
+}
+
+private final class StubEventKitService: EventKitService {
+    var stubbedItems: [Date: [TicItem]] = [:]
+    var stubbedDelayNs: [Date: UInt64] = [:]
+
+    override func fetchAllItems(for date: Date) async -> [TicItem] {
+        let targetDate = date.startOfDay
+        if let delay = stubbedDelayNs[targetDate] {
+            try? await Task.sleep(nanoseconds: delay)
+        }
+        return stubbedItems[targetDate] ?? []
     }
 }

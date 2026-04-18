@@ -18,10 +18,12 @@ schemes:
         tic: all
         ticWidgets: all
         ticTests: [test]
+        ticUITests: [test]
     test:
       config: Debug
       targets:
         - name: ticTests
+        - name: ticUITests
     run:
       config: Debug
 
@@ -87,5 +89,19 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.miny.tic.tests
         GENERATE_INFOPLIST_FILE: true
         CODE_SIGNING_ALLOWED: false
+    dependencies:
+      - target: tic
+
+  ticUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ticUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miny.tic.uitests
+        GENERATE_INFOPLIST_FILE: true
+        CODE_SIGNING_ALLOWED: false
+        TEST_TARGET_NAME: tic
     dependencies:
       - target: tic

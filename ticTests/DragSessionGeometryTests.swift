@@ -36,6 +36,59 @@ final class DragSessionGeometryTests: XCTestCase {
         XCTAssertNil(candidate)
     }
 
+    func testMinuteCandidateUsesOverlayTopWhenFingerLeavesTimelineBottom() {
+        let layout = DragTimelineLayout(
+            frameGlobal: CGRect(x: 40, y: 120, width: 280, height: 1440),
+            scrollOffsetY: 0,
+            hourHeight: 60
+        )
+        let dropZone = DragSessionGeometry.inset(layout.frameGlobal, by: 8)
+        let overlayFrame = CGRect(x: 80, y: 120 + 600, width: 120, height: 255)
+        let probePoint = DragSessionGeometry.timelineDropProbePoint(
+            pointerGlobal: CGPoint(x: 180, y: dropZone.maxY + 40),
+            overlayFrameGlobal: overlayFrame,
+            dropZone: dropZone
+        )
+
+        let candidate = DragSessionGeometry.minuteCandidate(
+            pointerGlobal: CGPoint(x: 180, y: dropZone.maxY + 40),
+            overlayFrameGlobal: overlayFrame,
+            layout: layout,
+            snapStep: 15,
+            dropInset: 8
+        )
+
+        XCTAssertEqual(probePoint.y, overlayFrame.minY)
+        XCTAssertEqual(candidate, 600)
+    }
+
+    func testMinuteCandidateUsesOverlayMidXWhenFingerHitsDayEdgeHoverZone() {
+        let layout = DragTimelineLayout(
+            frameGlobal: CGRect(x: 40, y: 120, width: 280, height: 1440),
+            scrollOffsetY: 0,
+            hourHeight: 60
+        )
+        let dropZone = DragSessionGeometry.inset(layout.frameGlobal, by: 8)
+        let overlayFrame = CGRect(x: 120, y: 120 + 240, width: 120, height: 255)
+        let probePoint = DragSessionGeometry.timelineDropProbePoint(
+            pointerGlobal: CGPoint(x: dropZone.minX - 40, y: 120 + 300),
+            overlayFrameGlobal: overlayFrame,
+            dropZone: dropZone
+        )
+
+        let candidate = DragSessionGeometry.minuteCandidate(
+            pointerGlobal: CGPoint(x: dropZone.minX - 40, y: 120 + 300),
+            overlayFrameGlobal: overlayFrame,
+            layout: layout,
+            snapStep: 15,
+            dropInset: 8
+        )
+
+        XCTAssertGreaterThanOrEqual(probePoint.x, dropZone.minX)
+        XCTAssertLessThanOrEqual(probePoint.x, dropZone.maxX)
+        XCTAssertEqual(candidate, 240)
+    }
+
     func testActiveDateUsesInsetAndHysteresis() {
         let april16 = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 16))!
         let april17 = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 17))!
