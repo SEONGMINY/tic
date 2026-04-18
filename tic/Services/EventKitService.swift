@@ -42,6 +42,8 @@ enum AlertTiming: Int, CaseIterable {
 
 @Observable
 class EventKitService {
+    static let uiTestMidnightEventTitle = "UITest Midnight Drag"
+
     private let store = EKEventStore()
     var calendarAccessGranted = false
     var reminderAccessGranted = false
@@ -290,6 +292,43 @@ class EventKitService {
     }
 
     @discardableResult
+    func ensureUITestMidnightEvent(on date: Date) throws -> String? {
+        guard calendarAccessGranted else { return nil }
+        guard let calendar = preferredWritableEventCalendar() else { return nil }
+
+        let start = Calendar.current.date(
+            bySettingHour: 0,
+            minute: 0,
+            second: 0,
+            of: date.startOfDay
+        )!
+        let end = Calendar.current.date(byAdding: .hour, value: 1, to: start)!
+        let predicate = store.predicateForEvents(
+            withStart: start,
+            end: end,
+            calendars: [calendar]
+        )
+
+        if let existing = store.events(matching: predicate).first(where: {
+            $0.title == Self.uiTestMidnightEventTitle
+                && $0.startDate == start
+                && $0.endDate == end
+        }) {
+            return existing.eventIdentifier
+        }
+
+        return try createEvent(
+            title: Self.uiTestMidnightEventTitle,
+            notes: nil,
+            start: start,
+            end: end,
+            calendar: calendar,
+            recurrence: .none,
+            alert: .none
+        )
+    }
+
+    @discardableResult
     func createReminder(
         title: String,
         notes: String?,
@@ -484,5 +523,22 @@ class EventKitService {
             self?.lastChangeDate = Date()
             self?.updateWidgetCache()
         }
+    }
+
+    private func preferredWritableEventCalendar() -> EKCalendar? {
+        let writableCalendars = store.calendars(for: .event).filter(\.allowsContentModifications)
+
+        if let enabledCalendarIdentifiers {
+            return writableCalendars.first { enabledCalendarIdentifiers.contains($0.calendarIdentifier) }
+        }
+
+        if let defaultCalendar = store.defaultCalendarForNewEvents,
+           let matchingDefault = writableCalendars.first(where: {
+               $0.calendarIdentifier == defaultCalendar.calendarIdentifier
+           }) {
+            return matchingDefault
+        }
+
+        return writableCalendars.first
     }
 }

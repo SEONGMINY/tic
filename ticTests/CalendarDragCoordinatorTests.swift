@@ -565,8 +565,8 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         let state = commit.map { CalendarScopeTransition.stateAfterGlobalDrop(commit: $0) }
 
         XCTAssertEqual(commit?.itemId, item.id)
-        XCTAssertEqual(commit?.start, expectedStartDate(on: dropDate, hour: 3, minute: 30))
-        XCTAssertEqual(commit?.end, expectedStartDate(on: dropDate, hour: 4, minute: 30))
+        XCTAssertEqual(commit?.start, expectedStartDate(on: dropDate, hour: 3, minute: 15))
+        XCTAssertEqual(commit?.end, expectedStartDate(on: dropDate, hour: 4, minute: 15))
         XCTAssertEqual(state?.scope, .day)
         XCTAssertEqual(state?.selectedDate, dropDate.startOfDay)
         XCTAssertEqual(state?.displayedMonth, dropDate.startOfMonth)
@@ -1055,13 +1055,13 @@ final class CalendarDragCoordinatorTests: XCTestCase {
 
     private var movedStartDate: Date {
         Calendar.current.date(
-            from: DateComponents(year: 2026, month: 4, day: 16, hour: 3, minute: 30)
+            from: DateComponents(year: 2026, month: 4, day: 16, hour: 3, minute: 15)
         )!
     }
 
     private var movedEndDate: Date {
         Calendar.current.date(
-            from: DateComponents(year: 2026, month: 4, day: 16, hour: 4, minute: 30)
+            from: DateComponents(year: 2026, month: 4, day: 16, hour: 4, minute: 15)
         )!
     }
 

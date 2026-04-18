@@ -1,6 +1,8 @@
 import XCTest
 
 final class DirectDragUITests: XCTestCase {
+    private let midnightEventTitle = "UITest Midnight Drag"
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -8,12 +10,13 @@ final class DirectDragUITests: XCTestCase {
     func testSameDayTimedBlockDragMovesVisibly() throws {
         let app = XCUIApplication()
         app.launchEnvironment["TIC_DRAG_DEBUG"] = "1"
+        app.launchEnvironment["TIC_UI_TEST_SEED_MIDNIGHT_EVENT"] = "1"
         app.launch()
         sleep(2)
 
         openTodayDayViewIfNeeded(in: app)
 
-        let event = try XCTUnwrap(findMidnightEvent(in: app), "00:00 timed block not found")
+        let event = try XCTUnwrap(findMidnightEvent(in: app), "Seeded 00:00 timed block not found")
         let eventId = event.identifier
         let beforeValue = stringValue(of: event)
 
@@ -77,7 +80,11 @@ final class DirectDragUITests: XCTestCase {
 
     private func firstMidnightEvent(in app: XCUIApplication) -> XCUIElement? {
         let query = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "timeline-event-")
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label == %@",
+                "timeline-event-",
+                midnightEventTitle
+            )
         )
 
         for element in query.allElementsBoundByIndex {

@@ -127,8 +127,9 @@ struct ContentView: View {
         .task {
             await eventKitService.requestCalendarAccess()
             await eventKitService.requestReminderAccess()
-            eventKitService.startObservingChanges()
             applyCalendarSelections()
+            seedUITestDataIfNeeded()
+            eventKitService.startObservingChanges()
             dragCoordinator.updateVisibleScope(viewModel.scope)
             // 첫 실행 시 Live Activity 체크
             await checkLiveActivity()
@@ -413,6 +414,14 @@ struct ContentView: View {
         // 캐시 무효화하여 즉시 반영
         eventKitService.invalidateMonthCache()
         eventKitService.lastChangeDate = Date()
+    }
+
+    private func seedUITestDataIfNeeded() {
+        guard ProcessInfo.processInfo.environment["TIC_UI_TEST_SEED_MIDNIGHT_EVENT"] == "1" else {
+            return
+        }
+
+        _ = try? eventKitService.ensureUITestMidnightEvent(on: viewModel.selectedDate)
     }
 
     private func applyGlobalDragCommit(
