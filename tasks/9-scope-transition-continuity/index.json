@@ -1,0 +1,24 @@
+{
+  "project": "tic",
+  "task": "scope-transition-continuity",
+  "prompt": "[$orchestrate-task-phases](/Users/leesm/work/side/tic/.codex/skills/orchestrate-task-phases/SKILL.md)\n좋아 해당이슈는 사라졌어.\n그런데 블록을 드래그 한체로 년,월 캘린더로 전환 시, 블록이 유지되고 애니메이션도 있어야 하는데 그 기능이 사라졌어.",
+  "totalPhases": 3,
+  "created_at": "2026-04-18T10:10:40+0900",
+  "phases": [
+    {
+      "phase": 0,
+      "name": "docs-pending-continuity",
+      "status": "pending"
+    },
+    {
+      "phase": 1,
+      "name": "coordinator-pending-overlay",
+      "status": "pending"
+    },
+    {
+      "phase": 2,
+      "name": "view-transition-continuity",
+      "status": "pending"
+    }
+  ]
+}

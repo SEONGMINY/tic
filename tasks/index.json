@@ -71,6 +71,13 @@
       "status": "completed",
       "created_at": "2026-04-17T18:51:01+0900",
       "completed_at": "2026-04-17T20:06:00+0900"
+    },
+    {
+      "id": 9,
+      "name": "scope-transition-continuity",
+      "dir": "9-scope-transition-continuity",
+      "status": "pending",
+      "created_at": "2026-04-18T10:10:40+0900"
     }
   ]
 }
