@@ -114,6 +114,8 @@ struct TimelineView: View {
                                     }
                                     return .gray
                                 }()
+                                let suppressInlineSourceBlock =
+                                    dragCoordinator.shouldSuppressInlineSourceBlock(for: item.id)
 
                                 if let placeholderOpacity = dragCoordinator.sourcePlaceholderOpacity(for: item.id) {
                                     blockContent(
@@ -129,6 +131,16 @@ struct TimelineView: View {
                                                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
                                         }
                                     }
+                                    .offset(x: editXPos, y: baseYPos)
+                                    .allowsHitTesting(false)
+                                } else if suppressInlineSourceBlock {
+                                    blockContent(
+                                        for: item,
+                                        bgColor: editBgColor,
+                                        width: max(editWidth - 2, 0),
+                                        height: max(baseHeight - 1, 16)
+                                    )
+                                    .opacity(0.001)
                                     .offset(x: editXPos, y: baseYPos)
                                     .allowsHitTesting(false)
                                 } else {

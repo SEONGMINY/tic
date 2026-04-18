@@ -8,17 +8,22 @@
     {
       "phase": 0,
       "name": "docs-pending-continuity",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-04-18T10:12:08+0900",
+      "completed_at": "2026-04-18T10:19:17+0900"
     },
     {
       "phase": 1,
       "name": "coordinator-pending-overlay",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-04-18T10:19:17+0900"
     },
     {
       "phase": 2,
       "name": "view-transition-continuity",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-04-18T10:19:17+0900"
     }
-  ]
+  ],
+  "completed_at": "2026-04-18T10:19:17+0900"
 }

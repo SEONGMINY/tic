@@ -176,6 +176,11 @@ phantomBlock: PhantomBlock?
 - gesture state: pointer 위치, finger anchor, hover hit-test 입력
 - display state: `timelineCard`/`calendarPill`, opacity, shadow, scale, restore/landing phase
 
+여기서 `render visibility`와 `interaction ownership`도 따로 본다.
+
+- `render visibility`: local preview, `holding card`, `calendarPill` 중 무엇을 지금 보여줄지 결정하는 정책
+- `interaction ownership`: source `placeholder`, month/year `activeDate` hover, `global drop ownership`을 누가 가질지 결정하는 정책
+
 cross-scope drag는 여기에 ownership handoff state를 하나 더 둔다.
 
 - local preview owner: source block 안에서 즉시 lift되는 미리보기
@@ -199,6 +204,7 @@ final class CalendarDragCoordinator {
 - `DayView`, `MonthView`, `YearView`는 owner가 아니라 geometry/frame reporting 역할만 가진다.
 - `DayView`의 legacy `edge-hover` timer/indicator 상태는 제거 대상이다.
 - scope가 바뀌어도 coordinator와 overlay는 유지된다.
+- coordinator는 `presentation continuity`와 `interaction ownership`을 같이 잠그지 않는다.
 - coordinator 또는 인접 순수 helper가 `idle`, `liftPreparing`, `floatingTimeline`, `transitionHoldingCard`, `floatingCalendarPill`, `returningToTimeline`, `dropping`, `restoring` 같은 presentation phase를 계산한다.
 - `DragSessionOverlayBlock`은 raw gesture 분기 대신 이 presentation model을 입력받는다.
 - 실제 이동 중 블록은 항상 하나의 `single overlay`만 유지한다.
@@ -255,8 +261,13 @@ struct DragSessionContext {
 - `pinch scope transition`은 `ContentView`가 owner인 bridge를 통해 같은 session 위에서 처리한다.
 - `bounded handoff`는 source local preview → explicit `touch claim` → root `single overlay` 순서를 지킨다.
 - `captureTouch(near:)`의 동기 성공을 drag 시작 조건으로 두지 않는다. root recognizer가 첫 프레임에 아직 touch를 관측하지 못했을 수 있기 때문이다.
-- root ownership이 오기 전에는 source placeholder, root overlay, month/year `activeDate` hover를 켜지 않는다.
+- 이번 회귀의 원인은 `ownership`과 `presentation continuity`를 같이 잠근 데 있었다.
+- `rootClaimPending`은 root ownership을 아직 주지 않는 상태지만, `render visibility`는 non-day continuity를 위해 별도 계산할 수 있다.
+- `day` 내부 local preview와 `non-day` continuity overlay는 같은 책임이 아니다.
+- `rootClaimPending + non-day`에서는 `holding card`를 마지막으로 확인된 day overlay frame에 잠깐 고정할 수 있다. 이것은 `render visibility`를 위한 `render continuity`이지 root `interaction ownership`이 아니다.
+- root ownership이 오기 전에는 source `placeholder`, root `interaction ownership`, month/year `activeDate` hover, `global drop ownership`을 켜지 않는다.
 - 원본 블록은 root claim 성공 뒤에만 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로만 렌더링한다.
+- claim 성공 전에는 `calendarPill`로 바꾸지 않는다.
 - `EditableEventBlock`은 local move completion owner가 아니라 pointer forwarding 역할만 가진다.
 - drag 중 실시간 추적은 per-frame animation이 아니라 직접 position 업데이트로 처리한다.
 - 상태 전환 애니메이션만 명시적으로 `withAnimation` 또는 spring을 사용한다.
@@ -265,6 +276,7 @@ struct DragSessionContext {
 - month/year에서는 `selectedDate`를 commit 전까지 바꾸지 않고 `activeDate`만 hover candidate로 유지한다.
 - month/year hover 계산은 root ownership 이후에만 활성화된다.
 - 최종 확정은 `drop on touch up`만 허용한다.
+- `pending + non-day` 상태에서 touch up 하면 commit이 아니라 `restore-first policy`로 복귀한다.
 - `droppable`은 독립 top-level state가 아니라, current state + candidate 유효성에서 계산되는 파생 판정이다.
 - `touch claim` pending은 `2 frame 이내의 매우 짧은 window`로 제한한다. 실패나 timeout이면 clamp보다 `restore-first policy`를 우선한다.
 - stale claim success / stale end / stale cancel은 현재 token과 맞지 않으면 무시한다.

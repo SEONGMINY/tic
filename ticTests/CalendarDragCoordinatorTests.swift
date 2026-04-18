@@ -165,6 +165,10 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.snapshot.activeDate)
         XCTAssertFalse(coordinator.handoffState.allowsCalendarHover)
         XCTAssertFalse(coordinator.shouldHandleDragGlobally)
+        XCTAssertTrue(coordinator.isRootOverlayVisible)
+        XCTAssertNotNil(coordinator.rootOverlayItem)
+        XCTAssertNotNil(coordinator.rootOverlayFrameLocal)
+        XCTAssertNil(coordinator.localPreviewFrameGlobal(for: item.id))
         XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .holding)
         XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
 
@@ -176,6 +180,42 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.shouldHandleDragGlobally)
         XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
         XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
+    }
+
+    func testPendingMonthTransitionSuppressesInlineSourceAndRestoresThroughContinuityOverlay() {
+        let coordinator = makeCoordinator(
+            restoreAnimationMs: 1,
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        coordinator.updateVisibleScope(.month)
+
+        XCTAssertTrue(coordinator.isRootOverlayVisible)
+        XCTAssertTrue(coordinator.shouldSuppressInlineSourceBlock(for: item.id))
+        XCTAssertNil(coordinator.localPreviewFrameGlobal(for: item.id))
+        XCTAssertFalse(coordinator.shouldHandleDragGlobally)
+        XCTAssertNil(coordinator.snapshot.activeDate)
+
+        coordinator.cancelDrag()
+
+        XCTAssertEqual(coordinator.handoffState.phase, .restoring)
+        XCTAssertTrue(coordinator.isRootOverlayVisible)
+        XCTAssertTrue(coordinator.shouldSuppressInlineSourceBlock(for: item.id))
+        XCTAssertNil(coordinator.localPreviewFrameGlobal(for: item.id))
+
+        waitForRestoreCleanup()
+
+        XCTAssertEqual(coordinator.handoffState.phase, .idle)
+        XCTAssertFalse(coordinator.hasActiveSession)
+        XCTAssertFalse(coordinator.isRootOverlayVisible)
     }
 
     func testClaimTimeoutRestoresSessionThroughRestorePath() {

@@ -147,9 +147,11 @@ final class CalendarDragCoordinator {
         switch handoffState.phase {
         case .rootClaimAcquired, .landing:
             return true
+        case .rootClaimPending:
+            return visibleScope != .day
         case .restoring:
-            return currentHandoffOwner == .root
-        case .idle, .localPreview, .rootClaimPending:
+            return currentHandoffOwner == .root || visibleScope != .day
+        case .idle, .localPreview:
             return false
         }
     }
@@ -218,10 +220,26 @@ final class CalendarDragCoordinator {
         guard let itemId,
               draggedItem?.id == itemId,
               currentHandoffOwner == .localPreview,
+              visibleScope == .day,
               handoffState.phase != .idle else {
             return nil
         }
         return displayedOverlayFrameGlobal
+    }
+
+    func shouldSuppressInlineSourceBlock(for itemId: String?) -> Bool {
+        guard let itemId,
+              itemId == placeholderItemId,
+              hasActiveSession else {
+            return false
+        }
+
+        switch handoffState.phase {
+        case .rootClaimPending, .restoring:
+            return visibleScope != .day
+        case .idle, .localPreview, .rootClaimAcquired, .landing:
+            return false
+        }
     }
 
     func updateRootFrame(_ frameGlobal: CGRect) {

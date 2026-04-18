@@ -29,15 +29,21 @@
   `bounded handoff`로 day source의 local preview lift 이후 explicit `touch claim`이 성공해야만 root `single overlay`로 전환
   pinch scope transition으로 day/year scope 전환 가능
   `CalendarDragCoordinator` session을 유지한 채 scope만 교체
-  lift 이후 overlay는 root scope 위에서 계속 유지되는 `single overlay`
+  이번 회귀의 원인은 `ownership`과 `presentation continuity`를 같이 잠근 데 있었다
+  `rootClaimPending` 상태에서 `day -> month/year`로 전환되면 블록은 사라지지 않고 `holding card`로 유지된다
+  이 `holding card`는 마지막으로 확인된 day overlay frame에 잠깐 고정된다
+  claim 성공 뒤 overlay는 root scope 위에서 계속 유지되는 `single overlay`
+  `rootClaimPending`의 `holding card`는 `render visibility`를 위한 continuity일 뿐이고 root `interaction ownership`은 아니다
   scope 전환 중에도 같은 블록을 계속 조작한다고 느껴야 함
   month/year hover 계산은 root `touch claim` 성공 이후에만 활성화
   각 날짜 셀 hover → `activeDate`만 갱신, `selectedDate`는 즉시 바뀌지 않음
   날짜 강조는 항상 하나의 `single active target`만 유지
   날짜 셀 판정은 global coordinates 기준 hit-test
+  claim 성공 전에는 `calendarPill`, source `placeholder`, `global drop ownership`을 켜지 않음
   drop은 `drop on touch up`으로만 확정
   valid drop 시 `activeDate + minuteCandidate`로 최종 확정
   month drop 성공 시 결과 날짜 기준으로 day scope로 복귀한 뒤 commit
+  `pending + non-day` 상태에서 touch up 하면 commit이 아니라 `restore-first policy`로 복귀
   invalid drop / cancel은 `restore-first policy`로 원위치 복원
 ```
 
@@ -95,13 +101,18 @@
   `bounded handoff`: drag 시작 직후에는 source 내부 local preview만 즉시 lift된다
   root ownership은 explicit `touch claim` 성공 후에만 root `single overlay`로 전환된다
   claim pending 동안에는 source placeholder를 켜지 않고, month/year `activeDate` hover도 시작하지 않는다
+  `rootClaimPending` 동안 `hover`, `placeholder`, `global drop ownership`을 막는 것은 맞지만 scope transition 중 `presentation continuity`까지 끄면 안 된다
+  `day` 내부 local preview와 `non-day` continuity overlay는 같은 책임이 아니다
+  `rootClaimPending` 상태에서 `day -> month/year`로 전환되면 블록은 사라지지 않고 `holding card`로 유지된다
+  이 `holding card`는 마지막으로 확인된 day overlay frame에 잠깐 고정된다
   `source block -> placeholder` 전환이 root claim보다 먼저 일어나면 안 된다
   local/global 좌표가 섞인 상태로 root handoff를 진행하면 안 된다
   `captureTouch(near:)`의 동기 성공을 drag 시작 조건으로 두지 않는다. root recognizer가 첫 프레임에 아직 touch를 못 본 상태면 drag가 아예 시작되지 않을 수 있다
   claim window는 `2 frame 이내의 매우 짧은 window`로 제한하고, 실패나 timeout이면 `restore-first policy`로 즉시 복원한다
   stale claim success / stale end / stale cancel은 현재 token과 맞지 않으면 무시한다
   drag session 중 pinch scope transition으로 day/month/year scope 전환 가능
-  drag session 중 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 `single overlay`로 유지
+  claim 성공 전에는 `calendarPill`로 바꾸지 않는다
+  claim 성공 뒤 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 `single overlay`로 유지
   overlay owner는 DayView가 아니라 root `CalendarDragCoordinator`
   day timeline에서는 `dateCandidate`, `minuteCandidate`를 둘 다 갱신
   month/year에서는 `selectedDate`를 유지한 채 `activeDate`만 갱신하고 `minuteCandidate`는 drag session이 유지
@@ -109,6 +120,7 @@
   drop은 `drop on touch up` 한 번으로만 끝남
   valid drop 시 `dateCandidate + minuteCandidate + duration`으로 확정
   month/year drop 성공 시 결과 날짜 기준으로 day scope로 복귀한 뒤 commit
+  `pending + non-day` 상태에서 touch up 하면 commit이 아니라 `restore-first policy`로 복귀
   삭제 탭 → 확인 alert → EventKit 삭제
   복제 탭 → 같은 시간에 즉시 배치 (반복 규칙 제외, sheet 없음)
 
@@ -190,12 +202,15 @@
  drag session 중:
   pinch scope transition으로 month scope 전환 가능
   `CalendarDragCoordinator` session을 유지한 채 scope만 교체
+  `rootClaimPending` 상태로 year scope에 들어와도 블록은 `holding card`로 계속 보일 수 있다. 이는 `presentation continuity`일 뿐 root `interaction ownership`은 아니다
   month/year hover 계산은 root `touch claim` 성공 이후에만 활성화
   pointer가 날짜 셀 위에서 안정적으로 머물면 `activeDate`만 갱신
+  claim 성공 전에는 `calendarPill`, source `placeholder`, `global drop ownership`을 켜지 않는다
   overlay는 root scope 위의 `single overlay`로 유지되고, scope 교체만으로는 종료되지 않음
   year scope에서는 익명 `calendarPill`과 `single active target`만 보임
   drop은 `drop on touch up`이며 `activeDate`가 있고 minuteCandidate가 유지된 경우에만 허용
   year drop 성공 시 결과 날짜 기준으로 day scope로 복귀한 뒤 commit
+  `pending + non-day` 상태에서 touch up 하면 commit이 아니라 `restore-first policy`로 복귀
   invalid drop / cancel은 `restore-first policy`로 복원
 ```
 

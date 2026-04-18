@@ -21,6 +21,8 @@
 - `restore-first policy`: invalid drop은 억지 확정 대신 원위치 복원을 우선한다
 - `bounded handoff`: drag 시작 직후 local preview가 먼저 lift되고, root owner 전환은 explicit `touch claim` 이후에만 일어난다
 - `touch claim`: root recognizer가 현재 touch를 현재 session token으로 명시적으로 인수했다는 신호다
+- `rootClaimPending`: local preview는 시작됐지만 root ownership은 아직 없고, `presentation continuity`만 제한적으로 유지될 수 있는 handoff pending 상태다
+- `holding card`: `rootClaimPending + non-day`에서 마지막 day overlay frame에 잠깐 고정되는 full card 표현이다
 
 ## 레퍼런스 영상 관찰
 
@@ -81,14 +83,29 @@
 - `source block -> placeholder` 전환이 root claim보다 먼저 일어나면 local preview와 root overlay가 동시에 owner처럼 보여 split-brain이 된다.
 - local/global 좌표가 섞인 상태로 root handoff를 진행하면 overlay 첫 프레임 점프와 잘못된 hit-test가 같이 발생한다.
 - `captureTouch(near:)`의 동기 성공을 drag 시작 조건으로 두면 root recognizer가 아직 touch를 관측하지 못한 첫 프레임에서 drag가 아예 시작되지 않을 수 있다.
+- 이번 회귀는 `ownership`과 `presentation continuity`를 같이 잠근 데 있었다. pending 동안 막아야 하는 상호작용 정책과, scope transition continuity에서 유지해야 하는 표현 정책이 분리되지 않았다.
 
 계약:
 
 - drag 시작 직후 source 내부의 local preview는 즉시 lift된다.
 - root ownership은 explicit `touch claim` 성공 후에만 전환된다.
-- claim pending 동안에는 source placeholder, root overlay, month/year `activeDate` hover를 켜지 않는다.
+- `rootClaimPending` 동안에는 source placeholder, month/year `activeDate` hover, `global drop ownership`을 켜지 않는다.
 - claim window는 `2 frame 이내의 매우 짧은 window`로 유지한다. 실패나 timeout이면 `restore-first policy`로 즉시 원위치 복구한다.
 - stale claim success, stale end, stale cancel은 현재 token과 맞지 않으면 무시한다.
+
+## pending scope transition continuity
+
+- `rootClaimPending` 동안 `hover`, `placeholder`, `global drop ownership`을 막는 것은 맞다.
+- 하지만 scope transition 중 객체의 `presentation continuity`까지 끄면 안 된다.
+- `day` 내부 local preview와 `non-day` continuity overlay는 같은 책임이 아니다.
+- `rootClaimPending` 상태에서 `day -> month/year`로 전환되면 블록은 사라지지 않고 `holding card`로 유지된다.
+- 이 `holding card`는 마지막으로 확인된 day overlay frame에 잠깐 고정된다.
+- 이 경로는 `render visibility`를 유지하는 `render continuity`일 뿐이다. `interaction ownership`이나 root ownership transfer가 아니다.
+- claim 성공 전에는 `calendarPill`로 바꾸지 않는다.
+- claim 성공 전에는 month/year `activeDate` hover를 켜지 않는다.
+- claim 성공 전에는 source placeholder를 켜지 않는다.
+- claim 성공 전에는 `global drop ownership`을 root로 승격하지 않는다.
+- `pending + non-day` 상태에서 touch up 하면 commit이 아니라 `restore-first policy`로 복귀한다.
 
 ## 역할 분리
 
@@ -96,6 +113,7 @@
 
 - lift 전: 원본 블록이 실제 조작 대상처럼 보인다.
 - lift 직후 claim pending 동안에는 source 내부 local preview만 활성 owner다.
+- `rootClaimPending + non-day`에서는 `holding card`가 continuity 표현만 담당한다. 여기서 보이는 overlay는 `interaction ownership`을 뜻하지 않는다.
 - root claim 성공 후: 원본 블록은 placeholder/ghost로 남고, 실제 이동 표현은 `single overlay`만 담당한다.
 - month/year에서는 `single active target`만 강조한다. 여러 날짜를 동시에 강조하지 않는다.
 - local preview와 root overlay가 동시에 활성 owner가 되면 안 된다.
