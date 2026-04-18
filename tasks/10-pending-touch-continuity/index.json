@@ -8,17 +8,22 @@
     {
       "phase": 0,
       "name": "docs-pending-tracking",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-04-18T17:49:45+0900",
+      "completed_at": "2026-04-18T17:59:09+0900"
     },
     {
       "phase": 1,
       "name": "pending-touch-relay",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-04-18T17:59:09+0900"
     },
     {
       "phase": 2,
       "name": "pending-animation-continuity",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-04-18T17:59:09+0900"
     }
-  ]
+  ],
+  "completed_at": "2026-04-18T17:59:09+0900"
 }

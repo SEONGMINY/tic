@@ -34,6 +34,8 @@
   이 `holding card`는 마지막으로 확인된 day overlay frame에 잠깐 고정된다
   claim 성공 뒤 overlay는 root scope 위에서 계속 유지되는 `single overlay`
   `rootClaimPending`의 `holding card`는 `render visibility`를 위한 continuity일 뿐이고 root `interaction ownership`은 아니다
+  `rootClaimPending + non-day`에서는 root가 같은 touch를 계속 관측하는 `touch tracking relay`도 유지돼야 한다
+  이 relay는 같은 손가락을 계속 따라가기 위한 것이고 root `interaction ownership`과는 별도다
   scope 전환 중에도 같은 블록을 계속 조작한다고 느껴야 함
   month/year hover 계산은 root `touch claim` 성공 이후에만 활성화
   각 날짜 셀 hover → `activeDate`만 갱신, `selectedDate`는 즉시 바뀌지 않음
@@ -105,6 +107,8 @@
   `day` 내부 local preview와 `non-day` continuity overlay는 같은 책임이 아니다
   `rootClaimPending` 상태에서 `day -> month/year`로 전환되면 블록은 사라지지 않고 `holding card`로 유지된다
   이 `holding card`는 마지막으로 확인된 day overlay frame에 잠깐 고정된다
+  `rootClaimPending + non-day`에서는 `touch tracking relay`가 같은 손가락을 계속 따라가며 `holding card`도 같이 움직여야 한다
+  이 relay는 root ownership이 아니므로 claim 성공 전에는 hover나 `global drop ownership`을 열지 않는다
   `source block -> placeholder` 전환이 root claim보다 먼저 일어나면 안 된다
   local/global 좌표가 섞인 상태로 root handoff를 진행하면 안 된다
   `captureTouch(near:)`의 동기 성공을 drag 시작 조건으로 두지 않는다. root recognizer가 첫 프레임에 아직 touch를 못 본 상태면 drag가 아예 시작되지 않을 수 있다
@@ -203,6 +207,7 @@
   pinch scope transition으로 month scope 전환 가능
   `CalendarDragCoordinator` session을 유지한 채 scope만 교체
   `rootClaimPending` 상태로 year scope에 들어와도 블록은 `holding card`로 계속 보일 수 있다. 이는 `presentation continuity`일 뿐 root `interaction ownership`은 아니다
+  이 구간에서도 `touch tracking relay`는 계속 살아 있어야 하며, 카드가 손가락을 계속 따라가야 한다
   month/year hover 계산은 root `touch claim` 성공 이후에만 활성화
   pointer가 날짜 셀 위에서 안정적으로 머물면 `activeDate`만 갱신
   claim 성공 전에는 `calendarPill`, source `placeholder`, `global drop ownership`을 켜지 않는다

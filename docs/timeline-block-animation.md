@@ -92,16 +92,20 @@
 - `rootClaimPending` 동안에는 source placeholder, month/year `activeDate` hover, `global drop ownership`을 켜지 않는다.
 - claim window는 `2 frame 이내의 매우 짧은 window`로 유지한다. 실패나 timeout이면 `restore-first policy`로 즉시 원위치 복구한다.
 - stale claim success, stale end, stale cancel은 현재 token과 맞지 않으면 무시한다.
+- `touch tracking relay`는 root ownership과 분리될 수 있다. root가 같은 live touch를 보고 있더라도, claim 성공 전에는 아직 root owner가 아니다.
 
 ## pending scope transition continuity
 
 - `rootClaimPending` 동안 `hover`, `placeholder`, `global drop ownership`을 막는 것은 맞다.
 - 하지만 scope transition 중 객체의 `presentation continuity`까지 끄면 안 된다.
+- `presentation continuity`만 복구하고 `touch tracking relay`를 복구하지 않으면, 블록은 보이지만 더 이상 움직이지 않는 frozen card가 된다.
 - `day` 내부 local preview와 `non-day` continuity overlay는 같은 책임이 아니다.
 - `rootClaimPending` 상태에서 `day -> month/year`로 전환되면 블록은 사라지지 않고 `holding card`로 유지된다.
 - 이 `holding card`는 마지막으로 확인된 day overlay frame에 잠깐 고정된다.
 - 이 경로는 `render visibility`를 유지하는 `render continuity`일 뿐이다. `interaction ownership`이나 root ownership transfer가 아니다.
+- `rootClaimPending + non-day`에서는 `touch tracking relay`가 같은 손가락을 계속 따라가며 `holding card`의 frame도 계속 갱신해야 한다.
 - claim 성공 전에는 `calendarPill`로 바꾸지 않는다.
+- `calendarPill` morph는 `claim 후 morph` 정책을 따른다.
 - claim 성공 전에는 month/year `activeDate` hover를 켜지 않는다.
 - claim 성공 전에는 source placeholder를 켜지 않는다.
 - claim 성공 전에는 `global drop ownership`을 root로 승격하지 않는다.
@@ -114,6 +118,7 @@
 - lift 전: 원본 블록이 실제 조작 대상처럼 보인다.
 - lift 직후 claim pending 동안에는 source 내부 local preview만 활성 owner다.
 - `rootClaimPending + non-day`에서는 `holding card`가 continuity 표현만 담당한다. 여기서 보이는 overlay는 `interaction ownership`을 뜻하지 않는다.
+- 같은 구간에서 `touch tracking relay`가 붙어 있으면 overlay는 손가락을 계속 따라가지만, 그것만으로 hover나 drop ownership이 열리지는 않는다.
 - root claim 성공 후: 원본 블록은 placeholder/ghost로 남고, 실제 이동 표현은 `single overlay`만 담당한다.
 - month/year에서는 `single active target`만 강조한다. 여러 날짜를 동시에 강조하지 않는다.
 - local preview와 root overlay가 동시에 활성 owner가 되면 안 된다.

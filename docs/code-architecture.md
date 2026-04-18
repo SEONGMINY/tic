@@ -180,6 +180,7 @@ phantomBlock: PhantomBlock?
 
 - `render visibility`: local preview, `holding card`, `calendarPill` 중 무엇을 지금 보여줄지 결정하는 정책
 - `interaction ownership`: source `placeholder`, month/year `activeDate` hover, `global drop ownership`을 누가 가질지 결정하는 정책
+- `touch tracking relay`: root가 같은 live touch를 계속 관측하고 overlay frame을 갱신할 수 있는지 결정하는 정책
 
 cross-scope drag는 여기에 ownership handoff state를 하나 더 둔다.
 
@@ -263,11 +264,14 @@ struct DragSessionContext {
 - `captureTouch(near:)`의 동기 성공을 drag 시작 조건으로 두지 않는다. root recognizer가 첫 프레임에 아직 touch를 관측하지 못했을 수 있기 때문이다.
 - 이번 회귀의 원인은 `ownership`과 `presentation continuity`를 같이 잠근 데 있었다.
 - `rootClaimPending`은 root ownership을 아직 주지 않는 상태지만, `render visibility`는 non-day continuity를 위해 별도 계산할 수 있다.
+- `rootClaimPending`은 root ownership을 아직 주지 않는 상태라도, `touch tracking relay`는 따로 붙어 있을 수 있다.
 - `day` 내부 local preview와 `non-day` continuity overlay는 같은 책임이 아니다.
 - `rootClaimPending + non-day`에서는 `holding card`를 마지막으로 확인된 day overlay frame에 잠깐 고정할 수 있다. 이것은 `render visibility`를 위한 `render continuity`이지 root `interaction ownership`이 아니다.
+- `rootClaimPending + non-day`에서는 `touch tracking relay`가 같은 손가락을 계속 따라가며 overlay frame을 갱신할 수 있어야 한다.
 - root ownership이 오기 전에는 source `placeholder`, root `interaction ownership`, month/year `activeDate` hover, `global drop ownership`을 켜지 않는다.
 - 원본 블록은 root claim 성공 뒤에만 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 overlay로만 렌더링한다.
 - claim 성공 전에는 `calendarPill`로 바꾸지 않는다.
+- `calendarPill` morph는 `claim 후 morph` 정책을 따른다. tracking relay가 살아 있어도 claim 성공 전에는 full `timelineCard`를 유지한다.
 - `EditableEventBlock`은 local move completion owner가 아니라 pointer forwarding 역할만 가진다.
 - drag 중 실시간 추적은 per-frame animation이 아니라 직접 position 업데이트로 처리한다.
 - 상태 전환 애니메이션만 명시적으로 `withAnimation` 또는 spring을 사용한다.

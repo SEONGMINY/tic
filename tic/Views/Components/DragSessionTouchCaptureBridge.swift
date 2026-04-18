@@ -3,8 +3,8 @@ import UIKit
 
 final class DragSessionTouchCaptureController {
     fileprivate weak var recognizer: DragSessionTouchCaptureRecognizer?
-    fileprivate var onClaimSucceeded: ((DragTouchClaimToken) -> Void)?
-    fileprivate var onMove: ((CGPoint) -> Void)?
+    fileprivate var onTrackingAttached: ((DragTouchClaimToken) -> Void)?
+    fileprivate var onMove: ((DragTouchClaimToken, CGPoint) -> Void)?
     fileprivate var onEnd: ((DragTouchClaimToken) -> Void)?
     fileprivate var onCancel: ((DragTouchClaimToken) -> Void)?
 
@@ -22,8 +22,8 @@ final class DragSessionTouchCaptureController {
 
 struct DragSessionTouchCaptureBridge: UIViewRepresentable {
     let controller: DragSessionTouchCaptureController
-    let onClaimSucceeded: (DragTouchClaimToken) -> Void
-    let onMove: (CGPoint) -> Void
+    let onTrackingAttached: (DragTouchClaimToken) -> Void
+    let onMove: (DragTouchClaimToken, CGPoint) -> Void
     let onEnd: (DragTouchClaimToken) -> Void
     let onCancel: (DragTouchClaimToken) -> Void
 
@@ -36,7 +36,7 @@ struct DragSessionTouchCaptureBridge: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: DragSessionTouchCaptureInstallerView, context: Context) {
-        controller.onClaimSucceeded = onClaimSucceeded
+        controller.onTrackingAttached = onTrackingAttached
         controller.onMove = onMove
         controller.onEnd = onEnd
         controller.onCancel = onCancel
@@ -66,11 +66,11 @@ final class DragSessionTouchCaptureInstallerView: UIView {
             }
 
             let recognizer = DragSessionTouchCaptureRecognizer()
-            recognizer.onClaimSucceeded = { [weak controller = self.controller] token in
-                controller?.onClaimSucceeded?(token)
+            recognizer.onTrackingAttached = { [weak controller = self.controller] token in
+                controller?.onTrackingAttached?(token)
             }
-            recognizer.onTrackedTouchMoved = { [weak controller = self.controller] point in
-                controller?.onMove?(point)
+            recognizer.onTrackedTouchMoved = { [weak controller = self.controller] token, point in
+                controller?.onMove?(token, point)
             }
             recognizer.onTrackedTouchEnded = { [weak controller = self.controller] token in
                 controller?.onEnd?(token)
@@ -86,8 +86,8 @@ final class DragSessionTouchCaptureInstallerView: UIView {
 }
 
 final class DragSessionTouchCaptureRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
-    var onClaimSucceeded: ((DragTouchClaimToken) -> Void)?
-    var onTrackedTouchMoved: ((CGPoint) -> Void)?
+    var onTrackingAttached: ((DragTouchClaimToken) -> Void)?
+    var onTrackedTouchMoved: ((DragTouchClaimToken, CGPoint) -> Void)?
     var onTrackedTouchEnded: ((DragTouchClaimToken) -> Void)?
     var onTrackedTouchCancelled: ((DragTouchClaimToken) -> Void)?
 
@@ -155,7 +155,8 @@ final class DragSessionTouchCaptureRecognizer: UIGestureRecognizer, UIGestureRec
             if state == .began {
                 state = .changed
             }
-            onTrackedTouchMoved?(globalLocation(for: touch))
+            guard let token = activeClaimToken else { continue }
+            onTrackedTouchMoved?(token, globalLocation(for: touch))
         }
     }
 
@@ -247,8 +248,8 @@ final class DragSessionTouchCaptureRecognizer: UIGestureRecognizer, UIGestureRec
         activeClaimToken = pendingClaim.token
         self.pendingClaim = nil
         state = .began
-        onClaimSucceeded?(pendingClaim.token)
-        onTrackedTouchMoved?(globalLocation(for: trackedTouch))
+        onTrackingAttached?(pendingClaim.token)
+        onTrackedTouchMoved?(pendingClaim.token, globalLocation(for: trackedTouch))
     }
 
     private func nearestTrackedTouch(to point: CGPoint) -> UITouch? {

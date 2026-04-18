@@ -218,6 +218,84 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isRootOverlayVisible)
     }
 
+    func testPendingTouchRelayKeepsHoldingCardMovingWithoutOpeningOwnership() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let dropPoint = CGPoint(x: 260, y: 100)
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
+        coordinator.updateVisibleScope(.month)
+        let token = currentToken(for: coordinator)
+        let beforeFrame = coordinator.rootOverlayFrameLocal
+
+        coordinator.attachTouchTrackingRelay(for: token)
+        coordinator.updateRelayedTouchMove(for: token, pointerGlobal: dropPoint)
+
+        XCTAssertTrue(coordinator.hasPendingTouchRelay)
+        XCTAssertNotEqual(coordinator.rootOverlayFrameLocal?.origin.x, beforeFrame?.origin.x)
+        XCTAssertNotEqual(coordinator.rootOverlayFrameLocal?.origin.y, beforeFrame?.origin.y)
+        XCTAssertFalse(coordinator.shouldHandleDragGlobally)
+        XCTAssertFalse(coordinator.handoffState.allowsCalendarHover)
+        XCTAssertNil(coordinator.snapshot.activeDate)
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .holding)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .timelineCard)
+        XCTAssertTrue(coordinator.shouldPromoteRelayedTouchToRootClaim(for: token))
+    }
+
+    func testPendingTouchRelayPromotesToRootClaimAndStartsCalendarPillPath() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let dropPoint = CGPoint(x: 260, y: 100)
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
+        coordinator.updateVisibleScope(.month)
+        let token = currentToken(for: coordinator)
+
+        coordinator.attachTouchTrackingRelay(for: token)
+        coordinator.updateRelayedTouchMove(for: token, pointerGlobal: dropPoint)
+        XCTAssertTrue(coordinator.shouldPromoteRelayedTouchToRootClaim(for: token))
+
+        let result = coordinator.applyRootClaimSuccess(
+            for: token,
+            at: timestamp(frame: 11, uptimeMs: 116)
+        )
+        XCTAssertEqual(result, .applied)
+        waitForCleanup()
+
+        XCTAssertFalse(coordinator.hasPendingTouchRelay)
+        XCTAssertTrue(coordinator.shouldHandleDragGlobally)
+        XCTAssertTrue(coordinator.handoffState.allowsCalendarHover)
+        XCTAssertEqual(coordinator.snapshot.activeDate, dropDate.startOfDay)
+        XCTAssertEqual(coordinator.overlayPresentation.visualPhase, .floating)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
+    }
+
     func testClaimTimeoutRestoresSessionThroughRestorePath() {
         let recorder = DragHandoffTraceRecorder()
         let coordinator = makeCoordinator(

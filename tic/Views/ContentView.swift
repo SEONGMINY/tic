@@ -51,13 +51,15 @@ struct ContentView: View {
         .background {
             DragSessionTouchCaptureBridge(
                 controller: rootTouchCapture,
-                onClaimSucceeded: { token in
-                    guard dragCoordinator.currentHandoffToken == token else { return }
-                    cancelRootClaimTimeout()
-                    _ = dragCoordinator.applyRootClaimSuccess(for: token)
+                onTrackingAttached: { token in
+                    dragCoordinator.attachTouchTrackingRelay(for: token)
                 },
-                onMove: { point in
-                    dragCoordinator.updateGlobalDrag(pointerGlobal: point)
+                onMove: { token, point in
+                    dragCoordinator.updateRelayedTouchMove(for: token, pointerGlobal: point)
+                    if dragCoordinator.shouldPromoteRelayedTouchToRootClaim(for: token) {
+                        cancelRootClaimTimeout()
+                        _ = dragCoordinator.applyRootClaimSuccess(for: token)
+                    }
                 },
                 onEnd: { token in
                     handleCapturedDragEnded(for: token)

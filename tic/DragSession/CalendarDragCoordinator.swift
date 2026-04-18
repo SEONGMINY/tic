@@ -74,6 +74,7 @@ final class CalendarDragCoordinator {
     private var landingCleanupWorkItem: DispatchWorkItem?
     private var pendingLandingCommit: DragSessionCommit?
     private var touchClaimHandoff = DragTouchClaimHandoff()
+    private var pendingTouchRelayToken: DragTouchClaimToken?
     private var claimFrameIndex = 0
 
     init(
@@ -174,6 +175,11 @@ final class CalendarDragCoordinator {
 
     var currentClaimSnapshot: DragTouchClaimSnapshot? {
         handoffState.claimSnapshot
+    }
+
+    var hasPendingTouchRelay: Bool {
+        handoffState.phase == .rootClaimPending
+            && pendingTouchRelayToken == handoffState.token
     }
 
     var sessionItem: TicItem? {
@@ -421,6 +427,7 @@ final class CalendarDragCoordinator {
         switch handoffState.phase {
         case .localPreview:
             let token = touchClaimHandoff.beginLocalPreview(at: timestamp ?? nextClaimTimestamp())
+            pendingTouchRelayToken = nil
             handoffState = resolvedHandoffState(for: .rootClaimPending)
             traceSink.record(.dragStart(token: token))
             return token
@@ -443,6 +450,7 @@ final class CalendarDragCoordinator {
 
         switch result {
         case .applied:
+            pendingTouchRelayToken = nil
             handoffState = resolvedHandoffState(for: .rootClaimAcquired)
             traceSink.record(.rootClaimSuccess(token: token))
             if let claimLatencyMs = touchClaimHandoff.snapshot.claimLatencyMs {
@@ -470,6 +478,7 @@ final class CalendarDragCoordinator {
         )
 
         if result == .applied {
+            pendingTouchRelayToken = nil
             recordRestoreReason(.cancelled)
             beginRestoreAfterClaimFailure()
         }
@@ -480,7 +489,11 @@ final class CalendarDragCoordinator {
     func applyRootClaimEnd(
         for token: DragTouchClaimToken
     ) -> DragTouchClaimEventResult {
-        touchClaimHandoff.reportClaimEnded(for: token)
+        let result = touchClaimHandoff.reportClaimEnded(for: token)
+        if result == .applied {
+            pendingTouchRelayToken = nil
+        }
+        return result
     }
 
     @discardableResult
@@ -495,6 +508,7 @@ final class CalendarDragCoordinator {
     ) -> DragTouchClaimEventResult {
         let result = touchClaimHandoff.expirePendingClaimIfNeeded(at: timestamp)
         if result == .applied {
+            pendingTouchRelayToken = nil
             if let token = touchClaimHandoff.snapshot.token {
                 traceSink.record(.rootClaimTimeout(token: token))
             }
@@ -539,6 +553,47 @@ final class CalendarDragCoordinator {
     func updateGlobalDrag(pointerGlobal: CGPoint) {
         guard shouldHandleDragGlobally else { return }
         updateActiveDrag(pointerGlobal: pointerGlobal)
+    }
+
+    func attachTouchTrackingRelay(for token: DragTouchClaimToken) {
+        guard handoffState.phase == .rootClaimPending,
+              handoffState.token == token else {
+            return
+        }
+        pendingTouchRelayToken = token
+    }
+
+    func updateRelayedTouchMove(
+        for token: DragTouchClaimToken,
+        pointerGlobal: CGPoint
+    ) {
+        guard handoffState.token == token else { return }
+
+        if handoffState.isRootClaimAcquired {
+            updateGlobalDrag(pointerGlobal: pointerGlobal)
+            return
+        }
+
+        guard hasPendingTouchRelay,
+              visibleScope != .day,
+              isGestureSessionActive else {
+            return
+        }
+
+        engine.dragMoved(
+            to: pointerGlobal,
+            timestampMs: nowTimestampMs(),
+            calendarFrames: []
+        )
+        syncDisplayedOverlayFrame()
+    }
+
+    func shouldPromoteRelayedTouchToRootClaim(
+        for token: DragTouchClaimToken
+    ) -> Bool {
+        hasPendingTouchRelay
+            && handoffState.token == token
+            && visibleScope != .day
     }
 
     func completeLocalDrag() -> DragSessionCommit? {
@@ -661,6 +716,7 @@ final class CalendarDragCoordinator {
         draggedItem = nil
         placeholderItemId = nil
         pendingLandingCommit = nil
+        pendingTouchRelayToken = nil
         displayedOverlayFrameGlobal = nil
         overlayPresentation = .inactive
         handoffState = .idle
