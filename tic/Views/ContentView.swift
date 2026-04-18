@@ -52,6 +52,7 @@ struct ContentView: View {
             DragSessionTouchCaptureBridge(
                 controller: rootTouchCapture,
                 onTrackingAttached: { token in
+                    cancelRootClaimTimeout()
                     dragCoordinator.attachTouchTrackingRelay(for: token)
                 },
                 onMove: { token, point in

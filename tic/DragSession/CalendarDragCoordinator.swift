@@ -270,6 +270,8 @@ final class CalendarDragCoordinator {
             timelineLayout: timelineLayout,
             calendarFrames: hoverEnabledCalendarFrames(for: dragScope)
         )
+
+        promotePendingTouchRelayIfNeeded(for: dragScope)
         updatePresentationForScopeChange(to: dragScope)
         syncDisplayedOverlayFrame(
             animated: shouldAnimateCalendarPillFrameChange(
@@ -506,6 +508,10 @@ final class CalendarDragCoordinator {
     func expirePendingRootClaimIfNeeded(
         at timestamp: DragTouchClaimTimestamp
     ) -> DragTouchClaimEventResult {
+        if hasPendingTouchRelay {
+            return .ignored
+        }
+
         let result = touchClaimHandoff.expirePendingClaimIfNeeded(at: timestamp)
         if result == .applied {
             pendingTouchRelayToken = nil
@@ -885,6 +891,16 @@ final class CalendarDragCoordinator {
                 previousActiveDate: previousActiveDate
             )
         )
+    }
+
+    private func promotePendingTouchRelayIfNeeded(for scope: DragSessionScope) {
+        guard scope != .day,
+              hasPendingTouchRelay,
+              let token = handoffState.token else {
+            return
+        }
+
+        _ = applyRootClaimSuccess(for: token)
     }
 
     private func updatePresentationAfterRootClaimSuccess() {

@@ -296,6 +296,65 @@ final class CalendarDragCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
     }
 
+    func testAttachedRelayPreventsPendingTimeoutRestore() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        let token = currentToken(for: coordinator)
+
+        coordinator.attachTouchTrackingRelay(for: token)
+
+        let result = coordinator.expirePendingRootClaimIfNeeded(
+            at: timestamp(frame: 13, uptimeMs: 150)
+        )
+
+        XCTAssertEqual(result, .ignored)
+        XCTAssertEqual(coordinator.handoffState.phase, .rootClaimPending)
+        XCTAssertTrue(coordinator.hasPendingTouchRelay)
+        XCTAssertTrue(coordinator.hasActiveSession)
+    }
+
+    func testMonthScopeChangePromotesAttachedRelayWithoutAdditionalMove() {
+        let coordinator = makeCoordinator(
+            overlayTimings: DragOverlayAnimationTimings(
+                liftDurationMs: 1,
+                scopeHoldDurationMs: 1,
+                pillTransitionDurationMs: 1,
+                landingDurationMs: 1
+            )
+        )
+        let item = makeItem()
+        let dropDate = Calendar.current.date(from: DateComponents(year: 2026, month: 4, day: 20))!
+        let monthFrames = [
+            DateCellFrame(date: dropDate, frameGlobal: CGRect(x: 240, y: 80, width: 60, height: 60))
+        ]
+
+        beginDrag(coordinator, item: item)
+        coordinator.updateActiveDrag(pointerGlobal: movedPointer)
+        coordinator.updateCalendarFrames(monthFrames, scope: .month)
+        let token = currentToken(for: coordinator)
+
+        coordinator.attachTouchTrackingRelay(for: token)
+        coordinator.updateVisibleScope(.month)
+        waitForCleanup()
+
+        XCTAssertEqual(coordinator.handoffState.phase, .rootClaimAcquired)
+        XCTAssertFalse(coordinator.hasPendingTouchRelay)
+        XCTAssertTrue(coordinator.shouldHandleDragGlobally)
+        XCTAssertTrue(coordinator.handoffState.allowsCalendarHover)
+        XCTAssertNil(coordinator.snapshot.activeDate)
+        XCTAssertEqual(coordinator.overlayPresentation.style, .calendarPill)
+    }
+
     func testClaimTimeoutRestoresSessionThroughRestorePath() {
         let recorder = DragHandoffTraceRecorder()
         let coordinator = makeCoordinator(
