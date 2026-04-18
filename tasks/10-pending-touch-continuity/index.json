@@ -1,0 +1,24 @@
+{
+  "project": "tic",
+  "task": "pending-touch-continuity",
+  "prompt": "[$orchestrate-task-phases](/Users/leesm/work/side/tic/.codex/skills/orchestrate-task-phases/SKILL.md)\n블록 Drag 후 년/월 캘린더로 전환했을 때, 블록이 없어지는 이슈는 해결됐어.\n하지만 다음 이슈가 나타나.\n\n- 전환 이후, 블록이 남아있지만, Drag 가 더 이상되지 않음.\n- 전환 이후, 블록 애니메이션이 있는데 사라짐.\n\n두 이슈 해결하기 위해 원인파악하고, 해결하기 위해서 어떻게 할지 나랑 논의하자.\n모호한 부분이 있으면 나와의 논의를 통해 결정해야해.",
+  "totalPhases": 3,
+  "created_at": "2026-04-18T17:48:40+0900",
+  "phases": [
+    {
+      "phase": 0,
+      "name": "docs-pending-tracking",
+      "status": "pending"
+    },
+    {
+      "phase": 1,
+      "name": "pending-touch-relay",
+      "status": "pending"
+    },
+    {
+      "phase": 2,
+      "name": "pending-animation-continuity",
+      "status": "pending"
+    }
+  ]
+}
