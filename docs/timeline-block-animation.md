@@ -23,6 +23,7 @@
 - `touch claim`: root recognizer가 현재 touch를 현재 session token으로 명시적으로 인수했다는 신호다
 - `rootClaimPending`: local preview는 시작됐지만 root ownership은 아직 없고, `presentation continuity`만 제한적으로 유지될 수 있는 handoff pending 상태다
 - `holding card`: `rootClaimPending + non-day`에서 마지막 day overlay frame에 잠깐 고정되는 full card 표현이다
+- `timelineDropProbePoint`: day timeline drop 판정에 쓰는 probe 좌표다. raw finger가 아니라 overlay top/midX를 쓴다
 
 ## 레퍼런스 영상 관찰
 
@@ -133,6 +134,10 @@
 drop 규칙:
 
 - `drop on touch up`만 허용한다.
+- day timeline의 `minuteCandidate`는 raw finger가 아니라 `timelineDropProbePoint` 기준으로 계산한다.
+- probe는 `overlayFrameGlobal.minY`와 `overlayFrameGlobal.midX(clamped to drop zone)`를 사용한다.
+- 손가락이 timeline 하단이나 좌우 edge band를 잠깐 벗어나도 overlay probe가 유효하면 same-day drop은 유지한다.
+- day edge-hover는 timeline 좌우 band에 pointer가 일정 시간 머무를 때만 인접 날짜로 이동한다.
 - drag 중 hover 변화만으로 commit하지 않는다.
 - 성공 commit 시에만 편집 모드 종료.
 - cancel / invalid drop / restore에서는 편집 모드를 강제로 종료하지 않는다.
@@ -166,6 +171,7 @@ drop 규칙:
 - cross-scope 전체 경로를 여러 overlay로 나누지 않는다.
 - `bounded handoff`는 local preview → explicit `touch claim` → root `single overlay` 순서를 지킨다.
 - `single overlay`와 `single active target` 원칙을 유지한다.
+- day edge-hover로 날짜를 넘길 때도 같은 session token과 overlay를 유지한다.
 - day 복귀 전까지 `selectedDate`를 섣불리 바꾸지 않는다.
 - invalid drop은 `restore-first policy`를 유지한다.
 

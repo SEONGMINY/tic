@@ -42,14 +42,15 @@ cross-scope move의 시작은 `bounded handoff`다.
 | 기능 | 상세 |
 |------|------|
 | 꼭짓점 리사이즈 | 상단-우측(시작시간), 하단-좌측(종료시간) 핸들. 15분 단위 스냅. 최소 30분. 핸들 옆 tooltip으로 시간 실시간 표시 |
-| 블록 이동 (같은 날) | 블록 본체 y축 드래그. 15분 단위 스냅. 자동 스크롤 지원 |
+| 블록 이동 (같은 날) | 블록 본체 y축 드래그. 15분 단위 스냅. 자동 스크롤 지원. day timeline drop은 raw finger가 아니라 `timelineDropProbePoint`로 계산한다. probe는 overlay top과 clamped midX를 쓰므로 손가락이 timeline 하단을 잠깐 벗어나도 block이 유효 위치면 drop은 유지된다. |
+| 블록 이동 (인접 날짜, day edge hover) | day timeline 좌우 edge band(24pt)에 pointer가 약 120ms 머무르면 이전/다음 날로 이동할 수 있다. 이때 pending relay를 root claim으로 승격한 뒤 `selectedDate`를 넘기고 같은 drag session과 overlay를 유지한다. |
 | 블록 이동 (날짜 간) | cross-day move도 별도 local fallback 없이 단일 `root drag path`로 처리한다. drag 시작 직후 local preview가 lift되고, explicit `touch claim` 성공 후에만 원본 블록이 placeholder/ghost로 남고 실제 이동 블록이 root `single overlay`로 넘어간다. claim pending 동안에는 placeholder를 켜지 않는다. |
 | 블록 이동 (scope 간) | `pinch scope transition`은 문서상의 제스처가 아니라 실제 구현 대상이다. drag session은 day → month/year 전환 중에도 유지되며, root `CalendarDragCoordinator`가 전역 overlay와 session lifetime을 소유한다. 다만 `rootClaimPending` 동안에는 `global drop ownership`과 hover를 열지 않는다. 이 구간은 `presentation continuity`를 위해 마지막 day overlay frame에 잠깐 고정된 `holding card`를 유지하고, `touch tracking relay`가 같은 손가락을 계속 따라가야 한다. claim 성공 전에는 `calendarPill`로 바꾸지 않는다. `pending + non-day` touch up은 commit이 아니라 restore다. claim 성공 뒤에만 익명 `calendarPill`과 month/year hover 경로가 열린다. |
 | drag 피드백 | pointer 이동과 overlay 이동은 drag 중 거의 즉시 일치해야 한다. 연속 drag follow와 hover update는 빠르게 지나가야 하고, per-frame animation으로 손가락을 늦게 따라가게 만들지 않는다. `touch claim` pending은 `2 frame 이내의 매우 짧은 window`로만 허용한다. |
-| drop 계산 | day timeline은 `dateCandidate`, `minuteCandidate`를 둘 다 갱신한다. month/year는 `selectedDate`를 commit 전까지 유지하고 `activeDate`만 갱신하며 `minuteCandidate`는 drag session이 유지한다. 최종 drop은 `drop on touch up`으로만 끝나고 `dateCandidate + minuteCandidate + duration`으로 계산한다. 성공 후 `selectedDate`와 화면 scope는 결과 날짜의 day 기준으로 맞춘다. Swift와 Python이 동일한 규칙을 사용한다. |
+| drop 계산 | day timeline은 `dateCandidate`, `minuteCandidate`를 둘 다 갱신한다. month/year는 `selectedDate`를 commit 전까지 유지하고 `activeDate`만 갱신하며 `minuteCandidate`는 drag session이 유지한다. day scope의 `minuteCandidate`는 raw finger가 아니라 overlay probe 기준으로 계산한다. 최종 drop은 `drop on touch up`으로만 끝나고 `dateCandidate + minuteCandidate + duration`으로 계산한다. 성공 후 `selectedDate`와 화면 scope는 결과 날짜의 day 기준으로 맞춘다. Swift와 Python이 동일한 규칙을 사용한다. |
 | 표현 단순화 | full card는 lift와 landing에서는 충분히 보이되, month/year 탐색 중에는 제목 텍스트와 핸들을 제거한 익명 capsule만 보여준다. month와 year 모두 `same pill length`를 유지해 같은 객체처럼 인지되게 한다. |
 | 강조 타이밍 | 강조가 필요한 구간은 `lift`, `scope transition 시작`, `landing`, `restore`다. 반대로 hover update와 drag follow는 눈에 띄지 않을 정도로 빠르게 지나가야 한다. |
-| 오류 처리 | invalid drop, overflow, hover 미확정, cancel, `touch claim` 실패/timeout은 clamp보다 `restore-first policy`를 우선한다. 성공 commit 시에만 편집 모드 종료. cancel / invalid drop / restore에서는 편집 모드를 강제로 종료하지 않는다. legacy `edge-hover` fallback은 제거 대상이다. |
+| 오류 처리 | invalid drop, overflow, hover 미확정, cancel, `touch claim` 실패/timeout은 clamp보다 `restore-first policy`를 우선한다. 성공 commit 시에만 편집 모드 종료. cancel / invalid drop / restore에서는 편집 모드를 강제로 종료하지 않는다. day edge-hover 경로도 동일한 restore 규칙을 사용한다. |
 | Floating toolbar | [삭제 \| 복제]. 블록 아래 (공간 부족 시 위). `.ultraThinMaterial` + cornerRadius(12) |
 | 해제 | 빈 영역 탭. 편집 중 블록 탭 → toolbar만 닫힘. 다른 블록 long press → 전환 |
 
@@ -139,7 +140,7 @@ cross-scope move의 시작은 `bounded handoff`다.
 | 빈 타임라인 long press | 일간 뷰 | → phantom block + 생성 sheet |
 | 시간 라벨 long press | 일간 뷰 | → phantom block + 생성 sheet (빈 타임라인과 동일) |
 | 좌우 스와이프 | 일간 뷰 (기본 상태) | 날짜 이동 |
-| 블록 좌우 드래그 | 일간 뷰 (편집 모드) | 같은 session 안에서 `root drag path`를 시작한다. legacy `edge-hover` timer fallback은 제거 대상이다. |
+| 블록 좌우 드래그 | 일간 뷰 (편집 모드) | 같은 session 안에서 `root drag path`를 시작한다. day timeline 좌우 edge band에 머무르면 인접 날짜 이동으로 이어질 수 있다. |
 | drag session 유지 | 일간 뷰 (편집 모드) | pinch 또는 다른 scope 전환 뒤에도 `CalendarDragCoordinator` session을 유지한다. |
 | 날짜 셀 hover | 월간/년간 뷰 (drag session 중) | `selectedDate`는 유지하고 `activeDate`만 갱신한다. 강조는 항상 하나의 target만 유지한다. |
 | drop | 월간/년간 뷰 (drag session 중) | `drop on touch up`으로만 끝난다. `activeDate + minuteCandidate + duration`이 유효할 때만 확정하고, 아니면 restore한다. 성공 후 `selectedDate`와 화면 scope는 결과 날짜의 day 기준으로 맞춘다. |

@@ -98,6 +98,8 @@
  조작:
   꼭짓점 드래그 → 리사이즈 (15분 스냅, 최소 30분)
   블록 본체 y축 드래그 → 같은 날 이동 (15분 스냅, 자동 스크롤)
+  day timeline drop은 raw finger가 아니라 block overlay의 top/midX probe로 계산
+  그래서 손가락이 timeline 하단이나 좌우 edge band를 잠깐 벗어나도 block이 유효 위치면 같은 날 drop은 유지된다
   블록 본체 이동은 단일 root drag path로만 처리
   drag 시작 직후 `liftPreparing` 단계에서 블록이 붙어 있는 요소에서 떠다니는 조작 대상으로 바뀜
   `bounded handoff`: drag 시작 직후에는 source 내부 local preview만 즉시 lift된다
@@ -118,6 +120,8 @@
   claim 성공 전에는 `calendarPill`로 바꾸지 않는다
   claim 성공 뒤 원본 블록은 placeholder/ghost처럼 남고, 실제 이동 중 블록은 전역 `single overlay`로 유지
   overlay owner는 DayView가 아니라 root `CalendarDragCoordinator`
+  day scope에서 pointer가 timeline 좌우 edge band(24pt)에 120ms 머물면 이전/다음 날로 이동할 수 있다
+  이 경로는 pending relay를 root claim으로 승격한 뒤 날짜를 넘기고, 같은 session과 overlay를 유지한다
   day timeline에서는 `dateCandidate`, `minuteCandidate`를 둘 다 갱신
   month/year에서는 `selectedDate`를 유지한 채 `activeDate`만 갱신하고 `minuteCandidate`는 drag session이 유지
   month/year의 이동 표현은 익명 `calendarPill`이며 같은 pill 길이를 유지
@@ -135,7 +139,7 @@
   성공 commit 시에만 편집 모드 종료
   invalid drop / overflow / hover 미확정 / cancel → `restore-first policy`로 복원
   cancel / invalid drop / restore에서는 편집 모드를 종료하지 않음
-  legacy edge-hover timer 기반 인접 날짜 이동은 핵심 경로가 아니며 제거 대상
+  day edge-hover 기반 인접 날짜 이동도 같은 root drag path와 restore 규칙을 따른다
 
  비활성화:
   타임라인 좌우 스와이프 (블록 드래그와 충돌 방지)

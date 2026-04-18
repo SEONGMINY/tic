@@ -29,6 +29,7 @@ tic/
 │
 ├── DragSession/
 │   ├── CalendarDragCoordinator.swift // root overlay owner, drag session 수명 관리
+│   ├── DragDebugLog.swift            // env-gated drag 디버그 로그
 │   ├── DragSessionTypes.swift        // 상태, 컨텍스트, snapshot 계약
 │   ├── DragSessionGeometry.swift     // minute/date/frame 계산 규칙
 │   └── DragSessionEngine.swift       // 순수 상태 전이 엔진
@@ -56,13 +57,15 @@ tic/
 │   ├── Calendar/
 │   │   ├── YearView.swift           // 12개월 그리드 + "올해" 버튼
 │   │   ├── MonthView.swift          // 캘린더 그리드 + "이번달" 버튼
-│   │   └── DayView.swift            // 주간 스트립 + 타임라인 + phantom block + 편집 모드 상태 (legacy edge-hover 상태는 제거 대상)
+│   │   └── DayView.swift            // 주간 스트립 + 타임라인 + phantom block + 편집 모드 상태
 │   ├── EventFormView.swift          // Segmented Control + 하루종일 토글 + 둥근 스타일
 │   ├── SearchView.swift
 │   ├── SettingsView.swift
 │   └── Components/
-│       ├── TimelineView.swift       // 24시간 타임라인 + 이벤트 블록 (기본 상태)
-│       ├── EditableEventBlock.swift  // 편집 모드 핸들 + 리사이즈 + pointer forwarding + toolbar
+│       ├── TimelineView.swift       // 24시간 타임라인 + viewport/layout reporting
+│       ├── EditableEventBlock.swift // 편집 모드 핸들 + 리사이즈 + pointer forwarding + toolbar
+│       ├── DragSessionOverlayBlock.swift
+│       ├── DragSessionTouchCaptureBridge.swift
 │       ├── NextActionCard.swift
 │       └── ChecklistSheet.swift
 │
@@ -77,8 +80,12 @@ tic/
 │   └── WidgetIntents.swift          // CompleteEventIntent, SnoozeEventIntent
 │
 ├── ticTests/
+│   ├── CalendarDragCoordinatorTests.swift
 │   ├── DragSessionGeometryTests.swift
 │   └── DragSessionEngineTests.swift
+│
+├── ticUITests/
+│   └── DirectDragUITests.swift      // 실제 simulator day drag 회귀 검증
 │
 └── TicLiveActivityView.swift        // Lock Screen + Dynamic Island (progress line UI)
 
@@ -203,7 +210,8 @@ final class CalendarDragCoordinator {
 - `ContentView`가 `CalendarDragCoordinator`를 단일 owner로 가진다.
 - `ContentView`가 `pinch scope transition` bridge의 owner다.
 - `DayView`, `MonthView`, `YearView`는 owner가 아니라 geometry/frame reporting 역할만 가진다.
-- `DayView`의 legacy `edge-hover` timer/indicator 상태는 제거 대상이다.
+- day scope 인접 날짜 이동은 `ContentView`의 edge-hover dwell tracker가 맡는다.
+- edge-hover는 timeline 좌우 band에 pointer가 머무르면 pending relay를 root claim으로 승격한 뒤 날짜를 넘긴다.
 - scope가 바뀌어도 coordinator와 overlay는 유지된다.
 - coordinator는 `presentation continuity`와 `interaction ownership`을 같이 잠그지 않는다.
 - coordinator 또는 인접 순수 helper가 `idle`, `liftPreparing`, `floatingTimeline`, `transitionHoldingCard`, `floatingCalendarPill`, `returningToTimeline`, `dropping`, `restoring` 같은 presentation phase를 계산한다.
@@ -330,9 +338,12 @@ enum DragOutcome {
 Swift와 Python은 아래 계산 기준을 공유한다.
 
 - 좌표계 단위: iOS point 기준 `global coordinates`
-- `timelineLocalY = pointerGlobalY - timelineFrame.minY + scrollOffsetY`
+- `timelineDropProbePoint`는 day timeline drop에 쓰는 probe 좌표다.
+- day scope probe는 `overlayFrameGlobal.minY`와 `overlayFrameGlobal.midX(clamped to drop zone)`를 사용한다.
+- `timelineLocalY = probeY - timelineFrame.minY + scrollOffsetY`
 - `rawMinute = timelineLocalY / hourHeight * 60`
 - `minuteCandidate = snap(clamp(rawMinute, 0, 1439), snapStep)`
+- raw finger가 timeline bottom 또는 edge band를 잠깐 벗어나도 overlay probe가 유효하면 same-day drop은 유지된다.
 - `dateCandidate`는 month/year cell hit-test와 hover hysteresis 규칙으로 계산
 - 최종 drop은 `dateCandidate + minuteCandidate + duration`으로 계산
 - `minuteCandidate`가 없거나 overflow가 발생하면 drop을 막고 `restore`
@@ -359,9 +370,10 @@ Swift와 Python은 아래 계산 기준을 공유한다.
 
 ## 테스트 전략
 
-- `ticTests`를 추가해 `DragSessionEngine`, geometry, hover hit-test 같은 순수 로직을 XCTest로 검증한다.
-- mock-heavy UI 테스트는 만들지 않는다.
-- SwiftUI View는 coordinator/engine integration 수준까지만 빌드 검증한다.
+- `ticTests`는 `DragSessionEngine`, geometry, hover hit-test, coordinator handoff, `DayViewModel` projection 같은 순수 로직을 검증한다.
+- `ticUITests`는 실제 simulator에서 timed block을 잡고 드래그한 뒤 시간이 바뀌는지 검증한다.
+- UI test는 `timeline-event-<item.id>` accessibility id와 `drag-debug-overlay`를 사용해 재현 경로를 고정한다.
+- mock-heavy snapshot 테스트는 만들지 않는다.
 
 ## 타임라인 레이아웃 알고리즘
 column-packing: 시작 시간 정렬 → 충돌 클러스터 그룹화 → 탐욕적 열 할당 → 너비 균등 분할. 뷰 body 바깥에서 `LayoutAttributes` 미리 계산, 날짜별 캐시.
